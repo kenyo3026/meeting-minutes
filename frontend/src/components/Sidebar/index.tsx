@@ -182,6 +182,7 @@ const Sidebar: React.FC = () => {
         whisperModel: config.whisperModel,
         apiKey: config.apiKey,
         ollamaEndpoint: config.ollamaEndpoint,
+        openaiCompatibleEndpoint: config.openaiCompatibleEndpoint,
       });
 
       setModelConfig(config);

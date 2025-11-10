@@ -20,11 +20,12 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter';
+  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'openai-compatible';
   model: string;
   whisperModel: string;
   apiKey?: string | null;
   ollamaEndpoint?: string | null;
+  openaiCompatibleEndpoint?: string | null;
 }
 
 interface OllamaModel {
@@ -66,6 +67,7 @@ export function ModelSettingsModal({
   const [openRouterError, setOpenRouterError] = useState<string>('');
   const [isLoadingOpenRouter, setIsLoadingOpenRouter] = useState<boolean>(false);
   const [ollamaEndpoint, setOllamaEndpoint] = useState<string>(modelConfig.ollamaEndpoint || '');
+  const [openaiCompatibleEndpoint, setOpenaiCompatibleEndpoint] = useState<string>(modelConfig.openaiCompatibleEndpoint || '');
   const [isLoadingOllama, setIsLoadingOllama] = useState<boolean>(false);
   const [lastFetchedEndpoint, setLastFetchedEndpoint] = useState<string>(modelConfig.ollamaEndpoint || '');
   const [endpointValidationState, setEndpointValidationState] = useState<'valid' | 'invalid' | 'none'>('none');
@@ -92,6 +94,20 @@ export function ModelSettingsModal({
       return false;
     }
   };
+
+  // Sync openaiCompatibleEndpoint when modelConfig changes
+  useEffect(() => {
+    if (modelConfig.openaiCompatibleEndpoint !== undefined) {
+      setOpenaiCompatibleEndpoint(modelConfig.openaiCompatibleEndpoint || '');
+    }
+  }, [modelConfig.openaiCompatibleEndpoint]);
+
+  // Sync ollamaEndpoint when modelConfig changes
+  useEffect(() => {
+    if (modelConfig.ollamaEndpoint !== undefined) {
+      setOllamaEndpoint(modelConfig.ollamaEndpoint || '');
+    }
+  }, [modelConfig.ollamaEndpoint]);
 
   // Debounced URL validation with visual feedback
   useEffect(() => {
@@ -159,13 +175,15 @@ export function ModelSettingsModal({
       'gpt-3.5-turbo-1106'
     ],
     openrouter: openRouterModels.map((m) => m.id),
+    'openai-compatible': [], // Will be manually entered or fetched
   };
 
   const requiresApiKey =
     modelConfig.provider === 'claude' ||
     modelConfig.provider === 'groq' ||
     modelConfig.provider === 'openai' ||
-    modelConfig.provider === 'openrouter';
+    modelConfig.provider === 'openrouter' ||
+    modelConfig.provider === 'openai-compatible';
 
   // Check if Ollama endpoint has changed but models haven't been fetched yet
   const ollamaEndpointChanged = modelConfig.provider === 'ollama' &&
@@ -364,9 +382,11 @@ export function ModelSettingsModal({
       ollamaEndpoint: modelConfig.provider === 'ollama' && ollamaEndpoint.trim()
         ? ollamaEndpoint.trim()
         : null,
+      openaiCompatibleEndpoint: modelConfig.provider === 'openai-compatible' && openaiCompatibleEndpoint.trim()
+        ? openaiCompatibleEndpoint.trim()
+        : null,
     };
     setModelConfig(updatedConfig);
-    console.log('ModelSettingsModal - handleSave - Updated ModelConfig:', updatedConfig);
 
     // Save auto-generate setting
     // try {
@@ -524,6 +544,7 @@ export function ModelSettingsModal({
                 <SelectItem value="ollama">Ollama</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
                 <SelectItem value="openrouter">OpenRouter</SelectItem>
+                <SelectItem value="openai-compatible">OpenAI Compatible</SelectItem>
               </SelectContent>
             </Select>
 
@@ -810,6 +831,37 @@ export function ModelSettingsModal({
                 )}
               </ScrollArea>
             )}
+          </div>
+        )}
+
+        {modelConfig.provider === 'openai-compatible' && (
+          <div className="space-y-4">
+            <div>
+              <Label>Base URL</Label>
+              <p className="text-sm text-muted-foreground mt-1 mb-2">
+                Enter your OpenAI-compatible API endpoint
+              </p>
+              <Input
+                type="url"
+                value={openaiCompatibleEndpoint}
+                onChange={(e) => setOpenaiCompatibleEndpoint(e.target.value)}
+                placeholder="https://api.your-service.com"
+                className="mt-1"
+              />
+            </div>
+
+            <div>
+              <Label>Model Name</Label>
+              <Input
+                type="text"
+                placeholder="Enter model name"
+                value={modelConfig.model}
+                onChange={(e) =>
+                  setModelConfig((prev: ModelConfig) => ({ ...prev, model: e.target.value }))
+                }
+                className="mt-1"
+              />
+            </div>
           </div>
         )}
       </div>

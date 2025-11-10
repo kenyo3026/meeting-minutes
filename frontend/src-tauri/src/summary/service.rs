@@ -90,6 +90,20 @@ impl SummaryService {
             None
         };
 
+        // Get OpenAI Compatible endpoint if provider is OpenAI Compatible
+        let openai_compatible_endpoint = if provider == LLMProvider::OpenAICompatible {
+            match SettingsRepository::get_model_config(&pool).await {
+                Ok(Some(config)) => config.openai_compatible_endpoint,
+                Ok(None) => None,
+                Err(e) => {
+                    info!("Failed to retrieve OpenAI Compatible endpoint: {}, using None", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // Dynamically fetch context size for Ollama models
         let token_threshold = if provider == LLMProvider::Ollama {
             match METADATA_CACHE.get_or_fetch(&model_name, ollama_endpoint.as_deref()).await {
@@ -127,6 +141,7 @@ impl SummaryService {
             &template_id,
             token_threshold,
             ollama_endpoint.as_deref(),
+            openai_compatible_endpoint.as_deref(),
         )
         .await;
 

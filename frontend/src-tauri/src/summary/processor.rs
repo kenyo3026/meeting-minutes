@@ -142,6 +142,7 @@ pub async fn generate_meeting_summary(
     template_id: &str,
     token_threshold: usize,
     ollama_endpoint: Option<&str>,
+    openai_compatible_endpoint: Option<&str>,
 ) -> Result<(String, i64), String> {
     info!(
         "Starting summary generation with provider: {:?}, model: {}",
@@ -190,6 +191,7 @@ pub async fn generate_meeting_summary(
                 system_prompt_chunk,
                 &user_prompt_chunk,
                 ollama_endpoint,
+                openai_compatible_endpoint,
             )
             .await
             {
@@ -235,6 +237,7 @@ pub async fn generate_meeting_summary(
                 system_prompt_combine,
                 &user_prompt_combine,
                 ollama_endpoint,
+                openai_compatible_endpoint,
             )
             .await?
         } else {
@@ -296,6 +299,7 @@ pub async fn generate_meeting_summary(
         &final_system_prompt,
         &final_user_prompt,
         ollama_endpoint,
+        openai_compatible_endpoint,
     )
     .await?;
 

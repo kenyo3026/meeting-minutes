@@ -60,6 +60,7 @@ pub enum LLMProvider {
     Groq,
     Ollama,
     OpenRouter,
+    OpenAICompatible,
 }
 
 impl LLMProvider {
@@ -71,6 +72,7 @@ impl LLMProvider {
             "groq" => Ok(Self::Groq),
             "ollama" => Ok(Self::Ollama),
             "openrouter" => Ok(Self::OpenRouter),
+            "openai-compatible" => Ok(Self::OpenAICompatible),
             _ => Err(format!("Unsupported LLM provider: {}", s)),
         }
     }
@@ -97,6 +99,7 @@ pub async fn generate_summary(
     system_prompt: &str,
     user_prompt: &str,
     ollama_endpoint: Option<&str>,
+    openai_compatible_endpoint: Option<&str>,
 ) -> Result<String, String> {
     let (api_url, mut headers) = match provider {
         LLMProvider::OpenAI => (
@@ -119,7 +122,7 @@ pub async fn generate_summary(
                 format!("{}/v1/chat/completions", host),
                 header::HeaderMap::new(),
             )
-        }
+        },
         LLMProvider::Claude => {
             let mut header_map = header::HeaderMap::new();
             header_map.insert(
@@ -135,17 +138,29 @@ pub async fn generate_summary(
                     .map_err(|_| "Invalid anthropic version".to_string())?,
             );
             ("https://api.anthropic.com/v1/messages".to_string(), header_map)
+        },
+        LLMProvider::OpenAICompatible => {
+            let base_url = openai_compatible_endpoint
+                .ok_or("OpenAI Compatible endpoint not configured")?
+                .trim_end_matches('/');
+            (
+                format!("{}/v1/chat/completions", base_url),
+                header::HeaderMap::new(),
+            )
         }
     };
 
     // Add authorization header for non-Claude providers
     if provider != &LLMProvider::Claude {
-        headers.insert(
-            header::AUTHORIZATION,
-            format!("Bearer {}", api_key)
-                .parse()
-                .map_err(|_| "Invalid authorization header".to_string())?,
-        );
+        // OpenAI Compatible might not need API key (local services)
+        if !api_key.is_empty() || provider != &LLMProvider::OpenAICompatible {
+            headers.insert(
+                header::AUTHORIZATION,
+                format!("Bearer {}", api_key)
+                    .parse()
+                    .map_err(|_| "Invalid authorization header".to_string())?,
+            );
+        }
     }
     headers.insert(
         header::CONTENT_TYPE,
@@ -243,5 +258,6 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::Groq => "Groq",
         LLMProvider::Ollama => "Ollama",
         LLMProvider::OpenRouter => "OpenRouter",
+        LLMProvider::OpenAICompatible => "OpenAI Compatible",
     }
 }

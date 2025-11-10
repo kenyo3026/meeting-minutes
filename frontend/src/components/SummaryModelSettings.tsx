@@ -15,7 +15,8 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
     apiKey: null,
-    ollamaEndpoint: null
+    ollamaEndpoint: null,
+    openaiCompatibleEndpoint: null
   });
 
   // Reusable fetch function
@@ -83,6 +84,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
         whisperModel: config.whisperModel,
         apiKey: config.apiKey,
         ollamaEndpoint: config.ollamaEndpoint,
+        openaiCompatibleEndpoint: config.openaiCompatibleEndpoint,
       });
 
       setModelConfig(config);

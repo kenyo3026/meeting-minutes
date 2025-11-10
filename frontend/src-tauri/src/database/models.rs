@@ -90,6 +90,12 @@ pub struct Setting {
     #[sqlx(rename = "ollamaEndpoint")]
     #[serde(rename = "ollamaEndpoint")]
     pub ollama_endpoint: Option<String>,
+    #[sqlx(rename = "openaiCompatibleEndpoint")]
+    #[serde(rename = "openaiCompatibleEndpoint")]
+    pub openai_compatible_endpoint: Option<String>,
+    #[sqlx(rename = "openaiCompatibleApiKey")]
+    #[serde(rename = "openaiCompatibleApiKey")]
+    pub openai_compatible_api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
