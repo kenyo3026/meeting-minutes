@@ -27,7 +27,15 @@ pub use template_commands::{
 };
 
 // Re-export commonly used items
-pub use llm_client::LLMProvider;
+pub use llm_client::{
+    LLMProvider,
+    ChatMessage,
+    stream_chat,
+    StreamTokenPayload,
+    StreamDonePayload,
+    StreamErrorPayload,
+    StreamUsage,
+};
 pub use processor::{
     chunk_text, clean_llm_markdown_output, extract_meeting_name_from_markdown,
     generate_meeting_summary, rough_token_count,
