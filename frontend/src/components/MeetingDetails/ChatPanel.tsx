@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MessageSquare, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ModelConfig } from '@/components/ModelSettingsModal';
+import { invoke } from '@tauri-apps/api/core';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { toast } from 'sonner';
 
 interface ChatPanelProps {
   meeting: {
@@ -24,6 +27,14 @@ interface Message {
   timestamp: Date;
 }
 
+interface MeetingContext {
+  meeting_id: string;
+  title: string;
+  created_at: string;
+  transcript: string;
+  transcript_count: number;
+}
+
 export function ChatPanel({
   meeting,
   modelConfig,
@@ -34,9 +45,91 @@ export function ChatPanel({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [context, setContext] = useState<MeetingContext | null>(null);
+  const streamingContentRef = useRef('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Load meeting context on mount
+  useEffect(() => {
+    const loadContext = async () => {
+      try {
+        const meetingContext = await invoke<MeetingContext>('chat_get_meeting_context', {
+          meetingId: meeting.id
+        });
+        setContext(meetingContext);
+      } catch (error) {
+        console.error('Failed to load meeting context:', error);
+        toast.error('Failed to load meeting transcript');
+      }
+    };
+
+    loadContext();
+  }, [meeting.id]);
+
+  // Set up streaming event listeners
+  useEffect(() => {
+    let tokenUnlisten: UnlistenFn | null = null;
+    let doneUnlisten: UnlistenFn | null = null;
+    let errorUnlisten: UnlistenFn | null = null;
+
+    const setupListeners = async () => {
+      // Listen for streaming tokens
+      tokenUnlisten = await listen('llm:chat:token', (event: any) => {
+        const { request_id, content_delta } = event.payload;
+        if (request_id === meeting.id) {
+          streamingContentRef.current += content_delta;
+
+          // Update the last message with accumulated content
+          setMessages(prev => {
+            const newMessages = [...prev];
+            if (newMessages.length > 0 && newMessages[newMessages.length - 1].role === 'assistant') {
+              newMessages[newMessages.length - 1] = {
+                ...newMessages[newMessages.length - 1],
+                content: streamingContentRef.current
+              };
+            }
+            return newMessages;
+          });
+        }
+      });
+
+      // Listen for completion
+      doneUnlisten = await listen('llm:chat:done', (event: any) => {
+        const { request_id } = event.payload;
+        if (request_id === meeting.id) {
+          setIsLoading(false);
+          streamingContentRef.current = '';
+        }
+      });
+
+      // Listen for errors
+      errorUnlisten = await listen('llm:chat:error', (event: any) => {
+        const { request_id, message } = event.payload;
+        if (request_id === meeting.id) {
+          console.error('Chat streaming error:', message);
+          toast.error(`Chat error: ${message}`);
+          setIsLoading(false);
+          streamingContentRef.current = '';
+        }
+      });
+    };
+
+    setupListeners();
+
+    return () => {
+      if (tokenUnlisten) tokenUnlisten();
+      if (doneUnlisten) doneUnlisten();
+      if (errorUnlisten) errorUnlisten();
+    };
+  }, [meeting.id]);
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !context) return;
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -49,16 +142,76 @@ export function ChatPanel({
     setInput('');
     setIsLoading(true);
 
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content: 'This is a placeholder response. LLM integration will be implemented in the next step.',
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, assistantMessage]);
+    // Create assistant message placeholder for streaming
+    const assistantMessage: Message = {
+      id: `assistant-${Date.now()}`,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, assistantMessage]);
+
+    // Reset streaming content
+    streamingContentRef.current = '';
+
+    try {
+      // Build message history with context
+      const chatMessages = [
+        {
+          role: 'system',
+          content: `You are a helpful AI assistant analyzing a meeting transcript. Here is the meeting information:
+
+Title: ${context.title}
+Date: ${new Date(context.created_at).toLocaleString()}
+
+Transcript:
+${context.transcript}
+
+Please answer the user's questions based on this meeting transcript.`
+        },
+        ...messages.map(m => ({
+          role: m.role,
+          content: m.content
+        })),
+        {
+          role: 'user',
+          content: userMessage.content
+        }
+      ];
+
+      // Get API key (same key used for all providers)
+      const apiKey = modelConfig.apiKey || undefined;
+
+      // Get endpoint for Ollama or OpenAI-compatible
+      let endpoint: string | undefined;
+      if (modelConfig.provider === 'ollama') {
+        endpoint = modelConfig.ollamaEndpoint || undefined;
+      } else if (modelConfig.provider === 'openai-compatible') {
+        endpoint = modelConfig.openaiCompatibleEndpoint || undefined;
+      }
+
+      // Send chat request
+      await invoke('chat_send_message', {
+        request: {
+          meeting_id: meeting.id,
+          messages: chatMessages,
+          provider: modelConfig.provider,
+          model: modelConfig.model,
+          api_key: apiKey,
+          endpoint: endpoint,
+          temperature: 0.7,
+          max_tokens: 2048
+        }
+      });
+
+    } catch (error) {
+      console.error('Failed to send chat message:', error);
+      toast.error('Failed to send message');
       setIsLoading(false);
-    }, 1000);
+
+      // Remove the placeholder assistant message on error
+      setMessages(prev => prev.slice(0, -1));
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -88,7 +241,14 @@ export function ChatPanel({
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-        {messages.length === 0 ? (
+        {!context ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500 mb-2"></div>
+              <p className="text-sm text-gray-600">Loading meeting transcript...</p>
+            </div>
+          </div>
+        ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
               <MessageSquare className="h-8 w-8 text-blue-600" />
@@ -121,29 +281,36 @@ export function ChatPanel({
             </div>
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
+          <>
+            {messages.map((message) => (
               <div
-                className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                  message.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-900'
-                }`}
+                key={message.id}
+                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <div className="text-sm whitespace-pre-wrap">{message.content}</div>
-                <div className={`text-xs mt-1 ${
-                  message.role === 'user' ? 'text-blue-100' : 'text-gray-500'
-                }`}>
-                  {message.timestamp.toLocaleTimeString()}
+                <div
+                  className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                    message.role === 'user'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-900'
+                  }`}
+                >
+                  <div className="text-sm whitespace-pre-wrap">
+                    {message.content || (
+                      <span className="text-gray-400 italic">Waiting for response...</span>
+                    )}
+                  </div>
+                  <div className={`text-xs mt-1 ${
+                    message.role === 'user' ? 'text-blue-100' : 'text-gray-500'
+                  }`}>
+                    {message.timestamp.toLocaleTimeString()}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            ))}
+            <div ref={messagesEndRef} />
+          </>
         )}
-        {isLoading && (
+        {isLoading && messages.length > 0 && messages[messages.length - 1].role === 'user' && (
           <div className="flex justify-start">
             <div className="bg-gray-100 rounded-lg px-4 py-2">
               <div className="flex items-center gap-2">
