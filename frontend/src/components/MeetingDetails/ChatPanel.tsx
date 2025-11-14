@@ -48,6 +48,9 @@ export function ChatPanel({
   const [context, setContext] = useState<MeetingContext | null>(null);
   const streamingContentRef = useRef('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
+  const lastScrollTimeRef = useRef(0);
 
   // Load meeting context on mount
   useEffect(() => {
@@ -123,9 +126,37 @@ export function ChatPanel({
     };
   }, [meeting.id]);
 
-  // Auto-scroll to bottom when messages change
+  // Check if user has scrolled up manually
+  const handleScroll = () => {
+    if (!messagesContainerRef.current) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    
+    // If user is within 100px of bottom, enable auto-scroll
+    // Otherwise, disable it (user has scrolled up manually)
+    shouldAutoScrollRef.current = distanceFromBottom < 100;
+  };
+
+  // Smooth auto-scroll with throttling (max once per 100ms)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!shouldAutoScrollRef.current) return;
+    
+    const now = Date.now();
+    const timeSinceLastScroll = now - lastScrollTimeRef.current;
+    
+    // Throttle scrolling to once per 100ms
+    if (timeSinceLastScroll < 100) return;
+    
+    lastScrollTimeRef.current = now;
+    
+    // Use requestAnimationFrame for smooth, synced scrolling
+    requestAnimationFrame(() => {
+      if (messagesContainerRef.current && shouldAutoScrollRef.current) {
+        const { scrollHeight, clientHeight } = messagesContainerRef.current;
+        messagesContainerRef.current.scrollTop = scrollHeight - clientHeight;
+      }
+    });
   }, [messages]);
 
   const handleSend = async () => {
@@ -141,6 +172,9 @@ export function ChatPanel({
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
+    
+    // Re-enable auto-scroll when sending a new message
+    shouldAutoScrollRef.current = true;
 
     // Create assistant message placeholder for streaming
     const assistantMessage: Message = {
@@ -240,7 +274,11 @@ Please answer the user's questions based on this meeting transcript.`
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+      <div 
+        ref={messagesContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0"
+      >
         {!context ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
