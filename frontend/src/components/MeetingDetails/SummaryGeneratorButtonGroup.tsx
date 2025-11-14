@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Sparkles, Settings, Loader2, FileText, Check } from 'lucide-react';
+import { Sparkles, Settings, Loader2, FileText, Check, MessageSquare } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -34,6 +34,7 @@ interface SummaryGeneratorButtonGroupProps {
   onTemplateSelect: (templateId: string, templateName: string) => void;
   hasTranscripts?: boolean;
   isModelConfigLoading?: boolean;
+  onChatClick?: () => void;
 }
 
 export function SummaryGeneratorButtonGroup({
@@ -47,7 +48,8 @@ export function SummaryGeneratorButtonGroup({
   selectedTemplate,
   onTemplateSelect,
   hasTranscripts = true,
-  isModelConfigLoading = false
+  isModelConfigLoading = false,
+  onChatClick
 }: SummaryGeneratorButtonGroupProps) {
   const [isCheckingModels, setIsCheckingModels] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
@@ -126,7 +128,23 @@ export function SummaryGeneratorButtonGroup({
           </>
         )}
       </Button>
-      
+
+      {/* Chat button */}
+      {onChatClick && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            Analytics.trackButtonClick('open_chat', 'meeting_details');
+            onChatClick();
+          }}
+          title="Chat with AI about this meeting"
+        >
+          <MessageSquare className="h-4 w-4" />
+          <span className="hidden lg:inline">Chat</span>
+        </Button>
+      )}
+
       {/* Settings button */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
         <DialogTrigger asChild>
@@ -156,8 +174,6 @@ export function SummaryGeneratorButtonGroup({
           />
         </DialogContent>
       </Dialog>
-
-      
 
       {/* Template selector dropdown */}
       {availableTemplates.length > 0 && (

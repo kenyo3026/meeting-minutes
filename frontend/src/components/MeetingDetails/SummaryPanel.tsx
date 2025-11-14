@@ -7,8 +7,11 @@ import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
+import { ChatPanel } from './ChatPanel';
 import Analytics from '@/lib/analytics';
-import { RefObject } from 'react';
+import { RefObject, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface SummaryPanelProps {
   meeting: {
@@ -82,6 +85,38 @@ export function SummaryPanel({
   isModelConfigLoading = false
 }: SummaryPanelProps) {
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
+  const [showChat, setShowChat] = useState(false);
+
+  // If chat is shown, render ChatPanel
+  if (showChat) {
+    return (
+      <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
+        {/* Back button */}
+        <div className="p-4 border-b border-gray-200">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowChat(false)}
+            className="gap-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Summary
+          </Button>
+        </div>
+
+        {/* Chat Panel */}
+        <div className="flex-1 overflow-hidden">
+          <ChatPanel
+            meeting={meeting}
+            modelConfig={modelConfig}
+            setModelConfig={setModelConfig}
+            onSaveModelConfig={onSaveModelConfig}
+            isModelConfigLoading={isModelConfigLoading}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
@@ -112,6 +147,7 @@ export function SummaryPanel({
                 onTemplateSelect={onTemplateSelect}
                 hasTranscripts={transcripts.length > 0}
                 isModelConfigLoading={isModelConfigLoading}
+                onChatClick={() => setShowChat(true)}
               />
             </div>
 
@@ -150,6 +186,7 @@ export function SummaryPanel({
               onTemplateSelect={onTemplateSelect}
               hasTranscripts={transcripts.length > 0}
               isModelConfigLoading={isModelConfigLoading}
+              onChatClick={() => setShowChat(true)}
             />
           </div>
           {/* Loading spinner */}
@@ -176,6 +213,7 @@ export function SummaryPanel({
               onTemplateSelect={onTemplateSelect}
               hasTranscripts={transcripts.length > 0}
               isModelConfigLoading={isModelConfigLoading}
+              onChatClick={() => setShowChat(true)}
             />
           </div>
           {/* Empty state message */}
