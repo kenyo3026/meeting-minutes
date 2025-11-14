@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { MessageSquare, Send, FileText } from 'lucide-react';
+import { MessageSquare, Send, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { Summary } from '@/types';
@@ -52,6 +52,7 @@ export function ChatPanel({
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [context, setContext] = useState<MeetingContext | null>(null);
+  const [isNoteExpanded, setIsNoteExpanded] = useState(true);
   const streamingContentRef = useRef('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -275,14 +276,16 @@ Please answer the user's questions based on this meeting transcript.`
         </div>
       </div>
 
-      {/* Note Preview Section - 25% height */}
-      <div className="flex-shrink-0 border-b border-gray-200 bg-gray-50" style={{ height: '25%' }}>
-        <div className="h-full overflow-y-auto p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <FileText className="h-4 w-4 text-gray-600" />
-              <h3 className="text-sm font-semibold text-gray-700">Meeting Note Preview</h3>
-            </div>
+      {/* Note Preview Section - Collapsible */}
+      <div
+        className="flex-shrink-0 border-b border-gray-200 bg-gray-50 transition-all duration-300 ease-in-out"
+        style={{ height: isNoteExpanded ? '25%' : 'auto' }}
+      >
+        {/* Header - always visible */}
+        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-gray-600" />
+            <h3 className="text-sm font-semibold text-gray-700">Meeting Note Preview</h3>
             <span className="text-xs text-gray-500">
               {summaryStatus === 'processing' || summaryStatus === 'summarizing'
                 ? '🔄 Generating...'
@@ -291,32 +294,50 @@ Please answer the user's questions based on this meeting transcript.`
                 : ''}
             </span>
           </div>
-
-          {/* Summary content */}
-          {!aiSummary ? (
-            <div className="text-sm text-gray-600">
-              <p className="mb-2">📝 No meeting notes yet.</p>
-              <p className="text-xs text-gray-500">
-                Generate a summary in the Summary tab to see the content here.
-              </p>
-            </div>
-          ) : summaryStatus === 'processing' || summaryStatus === 'summarizing' ? (
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-              <span>Generating meeting notes...</span>
-            </div>
-          ) : (
-            <div className="prose prose-sm max-w-none text-gray-700">
-              <ReactMarkdown>
-                {(aiSummary as any).markdown || 'No content available'}
-              </ReactMarkdown>
-            </div>
-          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsNoteExpanded(!isNoteExpanded)}
+            className="h-7 px-2"
+            title={isNoteExpanded ? 'Collapse note preview' : 'Expand note preview'}
+          >
+            {isNoteExpanded ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </Button>
         </div>
+
+        {/* Content - collapsible */}
+        {isNoteExpanded && (
+          <div className="h-full overflow-y-auto p-4" style={{ height: 'calc(100% - 44px)' }}>
+            {/* Summary content */}
+            {!aiSummary ? (
+              <div className="text-sm text-gray-600">
+                <p className="mb-2">📝 No meeting notes yet.</p>
+                <p className="text-xs text-gray-500">
+                  Generate a summary in the Summary tab to see the content here.
+                </p>
+              </div>
+            ) : summaryStatus === 'processing' || summaryStatus === 'summarizing' ? (
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                <span>Generating meeting notes...</span>
+              </div>
+            ) : (
+              <div className="prose prose-sm max-w-none text-gray-700">
+                <ReactMarkdown>
+                  {(aiSummary as any).markdown || 'No content available'}
+                </ReactMarkdown>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Chat Messages Section - 75% height */}
-      <div className="flex flex-col flex-1 min-h-0" style={{ maxHeight: '75%' }}>
+      {/* Chat Messages Section - Flexible height */}
+      <div className="flex flex-col flex-1 min-h-0">
         {/* Messages */}
         <div
           ref={messagesContainerRef}
