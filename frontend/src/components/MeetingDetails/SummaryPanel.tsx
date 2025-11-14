@@ -112,6 +112,8 @@ export function SummaryPanel({
             setModelConfig={setModelConfig}
             onSaveModelConfig={onSaveModelConfig}
             isModelConfigLoading={isModelConfigLoading}
+            aiSummary={aiSummary}
+            summaryStatus={summaryStatus}
           />
         </div>
       </div>

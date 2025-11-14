@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { MessageSquare, Send } from 'lucide-react';
+import { MessageSquare, Send, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ModelConfig } from '@/components/ModelSettingsModal';
+import { Summary } from '@/types';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
+import ReactMarkdown from 'react-markdown';
 
 interface ChatPanelProps {
   meeting: {
@@ -18,6 +20,8 @@ interface ChatPanelProps {
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
   onSaveModelConfig: (config?: ModelConfig) => Promise<void>;
   isModelConfigLoading?: boolean;
+  aiSummary: Summary | null;
+  summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 }
 
 interface Message {
@@ -40,7 +44,9 @@ export function ChatPanel({
   modelConfig,
   setModelConfig,
   onSaveModelConfig,
-  isModelConfigLoading = false
+  isModelConfigLoading = false,
+  aiSummary,
+  summaryStatus
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -128,10 +134,10 @@ export function ChatPanel({
   // Check if user has scrolled up manually
   const handleScroll = () => {
     if (!messagesContainerRef.current) return;
-    
+
     const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-    
+
     // If user is within 100px of bottom, enable auto-scroll
     // Otherwise, disable it (user has scrolled up manually)
     shouldAutoScrollRef.current = distanceFromBottom < 100;
@@ -140,15 +146,15 @@ export function ChatPanel({
   // Smooth auto-scroll with throttling (max once per 100ms)
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return;
-    
+
     const now = Date.now();
     const timeSinceLastScroll = now - lastScrollTimeRef.current;
-    
+
     // Throttle scrolling to once per 100ms
     if (timeSinceLastScroll < 100) return;
-    
+
     lastScrollTimeRef.current = now;
-    
+
     // Use requestAnimationFrame for smooth, synced scrolling
     requestAnimationFrame(() => {
       if (messagesContainerRef.current && shouldAutoScrollRef.current) {
@@ -171,7 +177,7 @@ export function ChatPanel({
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
-    
+
     // Re-enable auto-scroll when sending a new message
     shouldAutoScrollRef.current = true;
 
@@ -257,7 +263,7 @@ Please answer the user's questions based on this meeting transcript.`
   return (
     <div className="flex flex-col bg-white min-w-0 h-full">
       {/* Header */}
-      <div className="flex-shrink-0 p-4 border-b border-gray-200">
+      <div className="flex-shrink-0 px-4 py-3 border-b border-gray-200">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <MessageSquare className="h-5 w-5 text-blue-600" />
@@ -267,17 +273,56 @@ Please answer the user's questions based on this meeting transcript.`
             {modelConfig.provider} • {modelConfig.model}
           </div>
         </div>
-        <p className="text-sm text-gray-600 mt-1">
-          Ask questions about your meeting transcript
-        </p>
       </div>
 
-      {/* Messages */}
-      <div 
-        ref={messagesContainerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0"
-      >
+      {/* Note Preview Section - 25% height */}
+      <div className="flex-shrink-0 border-b border-gray-200 bg-gray-50" style={{ height: '25%' }}>
+        <div className="h-full overflow-y-auto p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-gray-600" />
+              <h3 className="text-sm font-semibold text-gray-700">Meeting Note Preview</h3>
+            </div>
+            <span className="text-xs text-gray-500">
+              {summaryStatus === 'processing' || summaryStatus === 'summarizing'
+                ? '🔄 Generating...'
+                : summaryStatus === 'completed' && aiSummary
+                ? '✓ Synced'
+                : ''}
+            </span>
+          </div>
+
+          {/* Summary content */}
+          {!aiSummary ? (
+            <div className="text-sm text-gray-600">
+              <p className="mb-2">📝 No meeting notes yet.</p>
+              <p className="text-xs text-gray-500">
+                Generate a summary in the Summary tab to see the content here.
+              </p>
+            </div>
+          ) : summaryStatus === 'processing' || summaryStatus === 'summarizing' ? (
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+              <span>Generating meeting notes...</span>
+            </div>
+          ) : (
+            <div className="prose prose-sm max-w-none text-gray-700">
+              <ReactMarkdown>
+                {(aiSummary as any).markdown || 'No content available'}
+              </ReactMarkdown>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Chat Messages Section - 75% height */}
+      <div className="flex flex-col flex-1 min-h-0" style={{ maxHeight: '75%' }}>
+        {/* Messages */}
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0"
+        >
         {!context ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
@@ -358,32 +403,33 @@ Please answer the user's questions based on this meeting transcript.`
             </div>
           </div>
         )}
-      </div>
+        </div>
 
-      {/* Input - Fixed at bottom */}
-      <div className="flex-shrink-0 p-4 border-t border-gray-200 bg-white">
+        {/* Input - Fixed at bottom */}
+        <div className="flex-shrink-0 px-4 py-3 border-t border-gray-200 bg-white">
         <div className="flex gap-2">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask a question about your meeting..."
-            className="flex-1 px-4 py-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            rows={3}
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+            rows={2}
             disabled={isLoading}
           />
           <Button
             onClick={handleSend}
             disabled={!input.trim() || isLoading}
             className="self-end"
-            size="lg"
+            size="default"
           >
-            <Send className="h-5 w-5" />
+            <Send className="h-4 w-4" />
           </Button>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
+        <p className="text-xs text-gray-500 mt-1.5">
           Press Enter to send, Shift+Enter for new line
         </p>
+        </div>
       </div>
     </div>
   );
