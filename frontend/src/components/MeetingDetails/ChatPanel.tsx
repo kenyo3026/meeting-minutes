@@ -8,7 +8,6 @@ import { Summary, Transcript } from '@/types';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
-import ReactMarkdown from 'react-markdown';
 import {
   Dialog,
   DialogContent,
@@ -20,6 +19,10 @@ import { BlockNoteSummaryView } from '@/components/AISummary/BlockNoteSummaryVie
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
 import Analytics from '@/lib/analytics';
+import dynamic from 'next/dynamic';
+import { useCreateBlockNote } from '@blocknote/react';
+import { BlockNoteView } from '@blocknote/shadcn';
+import "@blocknote/shadcn/style.css";
 
 interface ChatPanelProps {
   meeting: {
@@ -100,6 +103,34 @@ export function ChatPanel({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const lastScrollTimeRef = useRef(0);
+
+  // Create a read-only BlockNote editor for preview
+  const previewEditor = useCreateBlockNote({
+    initialContent: undefined
+  });
+
+  // Update preview editor when aiSummary changes
+  useEffect(() => {
+    const updatePreview = async () => {
+      if (!aiSummary || !previewEditor) return;
+
+      try {
+        // Check if we have BlockNote JSON format
+        if ((aiSummary as any).summary_json) {
+          previewEditor.replaceBlocks(previewEditor.document, (aiSummary as any).summary_json);
+        }
+        // Otherwise, try parsing markdown
+        else if ((aiSummary as any).markdown) {
+          const blocks = await previewEditor.tryParseMarkdownToBlocks((aiSummary as any).markdown);
+          previewEditor.replaceBlocks(previewEditor.document, blocks);
+        }
+      } catch (err) {
+        console.error('Failed to update preview editor:', err);
+      }
+    };
+
+    updatePreview();
+  }, [aiSummary, previewEditor]);
 
   // Load meeting context on mount
   useEffect(() => {
@@ -504,10 +535,12 @@ Please answer the user's questions based on this meeting transcript.`
                 <span>Generating meeting notes...</span>
               </div>
             ) : (
-              <div className="prose prose-sm max-w-none text-gray-700">
-                <ReactMarkdown>
-                  {(aiSummary as any).markdown || 'No content available'}
-                </ReactMarkdown>
+              <div className="w-full">
+                <BlockNoteView
+                  editor={previewEditor}
+                  editable={false}
+                  theme="light"
+                />
               </div>
             )}
           </div>
