@@ -158,4 +158,42 @@
   [data-node-type] {
     overflow: visible !important;
   }
+
+  /* BlockNote Preview (Read-only) - Chat Panel */
+  .blocknote-preview-readonly .bn-editor {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+  }
+
+  .blocknote-preview-readonly .bn-container {
+    background: transparent !important;
+    padding: 0 !important;
+  }
+
+  /* Force text alignment to left for all content */
+  .blocknote-preview-readonly .bn-block-content,
+  .blocknote-preview-readonly .bn-block-content-wrapper,
+  .blocknote-preview-readonly [data-content-type],
+  .blocknote-preview-readonly p,
+  .blocknote-preview-readonly h1,
+  .blocknote-preview-readonly h2,
+  .blocknote-preview-readonly h3,
+  .blocknote-preview-readonly h4,
+  .blocknote-preview-readonly div,
+  .blocknote-preview-readonly span,
+  .blocknote-preview-readonly .ProseMirror,
+  .blocknote-preview-readonly .ProseMirror > * {
+    text-align: left !important;
+    justify-content: flex-start !important;
+  }
+
+  /* Override any inline styles that might center text */
+  .blocknote-preview-readonly [style*="text-align: center"],
+  .blocknote-preview-readonly [style*="text-align:center"],
+  .blocknote-preview-readonly [style*="text-align: center;"],
+  .blocknote-preview-readonly [style*="text-align:center;"] {
+    text-align: left !important;
+  }
 }

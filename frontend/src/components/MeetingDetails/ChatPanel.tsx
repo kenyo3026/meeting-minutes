@@ -535,7 +535,7 @@ Please answer the user's questions based on this meeting transcript.`
                 <span>Generating meeting notes...</span>
               </div>
             ) : (
-              <div className="w-full">
+              <div className="w-full blocknote-preview-readonly">
                 <BlockNoteView
                   editor={previewEditor}
                   editable={false}
