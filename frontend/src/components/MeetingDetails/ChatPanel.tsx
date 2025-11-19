@@ -72,6 +72,7 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  ttft_us?: number; // Time To First Token in microseconds (1 ms = 1000 μs)
 }
 
 interface MeetingContext {
@@ -178,8 +179,21 @@ export function ChatPanel({
 
       // Listen for completion
       doneUnlisten = await listen('llm:chat:done', (event: any) => {
-        const { request_id } = event.payload;
+        const { request_id, ttft_us } = event.payload;
         if (request_id === meeting.id) {
+          // Update the last assistant message with TTFT
+          if (ttft_us !== undefined) {
+            setMessages(prev => {
+              const newMessages = [...prev];
+              if (newMessages.length > 0 && newMessages[newMessages.length - 1].role === 'assistant') {
+                newMessages[newMessages.length - 1] = {
+                  ...newMessages[newMessages.length - 1],
+                  ttft_us: ttft_us
+                };
+              }
+              return newMessages;
+            });
+          }
           setIsLoading(false);
         }
       });
@@ -331,6 +345,28 @@ Please answer the user's questions based on this meeting transcript.`
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  // Format TTFT for display (input is in microseconds)
+  const formatTTFT = (ttft_us: number): string => {
+    // Convert microseconds to milliseconds with decimal precision
+    const ttft_ms = ttft_us / 1000;
+
+    if (ttft_ms < 1000) {
+      // Less than 1 second - show in milliseconds with 2 decimal places
+      return `${ttft_ms.toFixed(2)}ms`;
+    } else if (ttft_ms < 60000) {
+      // Less than 1 minute - show in seconds with 2 decimal places
+      const seconds = (ttft_ms / 1000).toFixed(2);
+      return `${seconds}s`;
+    } else {
+      // 1 minute or more - show in mm:ss.ms format
+      const minutes = Math.floor(ttft_ms / 60000);
+      const remainingMs = ttft_ms % 60000;
+      const seconds = Math.floor(remainingMs / 1000);
+      const ms = (remainingMs % 1000).toFixed(2);
+      return `${minutes}:${seconds.toString().padStart(2, '0')}.${ms}`;
     }
   };
 
@@ -613,10 +649,15 @@ Please answer the user's questions based on this meeting transcript.`
                       <span className="text-gray-400 italic">Waiting for response...</span>
                     )}
                   </div>
-                  <div className={`text-xs mt-1 ${
+                  <div className={`text-xs mt-1 flex items-center gap-2 ${
                     message.role === 'user' ? 'text-blue-100' : 'text-gray-500'
                   }`}>
-                    {message.timestamp.toLocaleTimeString()}
+                    <span>{message.timestamp.toLocaleTimeString()}</span>
+                    {message.role === 'assistant' && message.ttft_us !== undefined && (
+                      <span className="text-[10px] opacity-70">
+                        • ttft: {formatTTFT(message.ttft_us)}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

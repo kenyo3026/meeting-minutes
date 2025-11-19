@@ -27,6 +27,9 @@ pub struct StreamDonePayload {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    /// Time to first token in microseconds (1 ms = 1000 μs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttft_us: Option<u64>,
 }
 
 /// Usage statistics for streaming
@@ -45,6 +48,30 @@ pub struct StreamUsage {
 pub struct StreamErrorPayload {
     pub request_id: String,
     pub message: String,
+}
+
+// ============================================================================
+// TTFT LOGGING UTILITIES
+// ============================================================================
+
+/// Log unified TTFT metrics in a clean 3-line format
+///
+/// # Arguments
+/// * `ttft_us` - Time to first token in microseconds
+/// * `total_time_us` - Total streaming time in microseconds
+fn log_ttft_metrics(ttft_us: Option<u64>, total_time_us: u64) {
+    if let Some(ttft) = ttft_us {
+        let t1_to_tn_us = total_time_us - ttft;
+        let ttft_ms = ttft as f64 / 1000.0;
+        let t1_to_tn_ms = t1_to_tn_us as f64 / 1000.0;
+        let total_ms = total_time_us as f64 / 1000.0;
+        let ttft_ratio = (ttft as f64 / total_time_us as f64) * 100.0;
+
+        info!("⏱️  Timeline: t0 (start) → t1 (first token) → tn (complete)");
+        info!("⏱️  Elapsed: t0→t1={:.0}ms | t1→tn={:.0}ms | t0→tn={:.0}ms",
+              ttft_ms, t1_to_tn_ms, total_ms);
+        info!("⏱️  TTFT: {:.0}ms ({:.1}% of total)", ttft_ms, ttft_ratio);
+    }
 }
 
 // ============================================================================
@@ -126,6 +153,9 @@ pub struct StreamChatChunk {
     pub choices: Vec<StreamChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<StreamUsageResponse>,
+    /// Unix timestamp (seconds since epoch) when this chunk was created
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<i64>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -637,6 +667,9 @@ async fn stream_chat_openai_compatible<R: Runtime>(
     let mut buffer = String::new();
     let mut finish_reason: Option<String> = None;
     let mut usage_stats: Option<StreamUsage> = None;
+    let mut ttft_us: Option<u64> = None;
+    let request_start_time = std::time::Instant::now();
+    let mut first_token_received = false;
 
     while let Some(chunk_result) = stream.next().await {
         match chunk_result {
@@ -668,6 +701,13 @@ async fn stream_chat_openai_compatible<R: Runtime>(
                                     if let Some(choice) = parsed_chunk.choices.first() {
                                         if let Some(content) = &choice.delta.content {
                                             if !content.is_empty() {
+                                                // Calculate TTFT on first token
+                                                if !first_token_received {
+                                                    first_token_received = true;
+                                                    // Calculate TTFT in microseconds for higher precision
+                                                    ttft_us = Some(request_start_time.elapsed().as_micros() as u64);
+                                                }
+
                                                 // Emit token event
                                                 let _ = app.emit(
                                                     "llm:chat:token",
@@ -708,6 +748,10 @@ async fn stream_chat_openai_compatible<R: Runtime>(
         }
     }
 
+    // Log unified TTFT metrics at completion
+    let total_time_us = request_start_time.elapsed().as_micros() as u64;
+    log_ttft_metrics(ttft_us, total_time_us);
+
     // Emit completion event
     let _ = app.emit(
         "llm:chat:done",
@@ -717,6 +761,7 @@ async fn stream_chat_openai_compatible<R: Runtime>(
             finish_reason,
             model: Some(model_name.to_string()),
             provider: Some(provider_name(provider).to_string()),
+            ttft_us,
         },
     );
 
@@ -812,6 +857,9 @@ async fn stream_chat_claude<R: Runtime>(
     let mut finish_reason: Option<String> = None;
     let mut usage_input: Option<u32> = None;
     let mut usage_output: Option<u32> = None;
+    let mut ttft_us: Option<u64> = None;
+    let request_start_time = std::time::Instant::now();
+    let mut first_token_received = false;
 
     while let Some(chunk_result) = stream.next().await {
         match chunk_result {
@@ -847,6 +895,12 @@ async fn stream_chat_claude<R: Runtime>(
                                         }
                                     }
                                     ClaudeStreamEvent::ContentBlockDelta { delta } => {
+                                        // Calculate TTFT on first token
+                                        if !first_token_received && !delta.text.is_empty() {
+                                            first_token_received = true;
+                                            ttft_us = Some(request_start_time.elapsed().as_micros() as u64);
+                                        }
+
                                         // Emit token event
                                         let _ = app.emit(
                                             "llm:chat:token",
@@ -897,6 +951,10 @@ async fn stream_chat_claude<R: Runtime>(
         None
     };
 
+    // Log unified TTFT metrics at completion
+    let total_time_us = request_start_time.elapsed().as_micros() as u64;
+    log_ttft_metrics(ttft_us, total_time_us);
+
     let _ = app.emit(
         "llm:chat:done",
         StreamDonePayload {
@@ -905,6 +963,7 @@ async fn stream_chat_claude<R: Runtime>(
             finish_reason,
             model: Some(model_name.to_string()),
             provider: Some("Claude".to_string()),
+            ttft_us,
         },
     );
 
