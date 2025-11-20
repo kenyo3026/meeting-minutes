@@ -33,6 +33,7 @@ impl SummaryService {
     /// * `model_name` - Specific model (e.g., "gpt-4", "llama3.2:latest")
     /// * `custom_prompt` - Optional user-provided context
     /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
+    /// * `language_id` - Language code (e.g., "en", "zh-tw")
     pub async fn process_transcript_background<R: tauri::Runtime>(
         _app: AppHandle<R>,
         pool: SqlitePool,
@@ -42,6 +43,7 @@ impl SummaryService {
         model_name: String,
         custom_prompt: String,
         template_id: String,
+        language_id: String,
     ) {
         let start_time = Instant::now();
         info!(
@@ -139,6 +141,7 @@ impl SummaryService {
             &text,
             &custom_prompt,
             &template_id,
+            &language_id,
             token_threshold,
             ollama_endpoint.as_deref(),
             openai_compatible_endpoint.as_deref(),
@@ -148,7 +151,7 @@ impl SummaryService {
         let duration = start_time.elapsed().as_secs_f64();
 
         match result {
-            Ok((mut final_markdown, num_chunks)) => {
+            Ok((mut final_markdown, num_chunks, ttft_us, total_time_us)) => {
                 if num_chunks == 0 && final_markdown.is_empty() {
                     Self::update_process_failed(
                         &pool,
@@ -163,6 +166,15 @@ impl SummaryService {
                     "✓ Successfully processed {} chunks for meeting_id: {}. Duration: {:.2}s",
                     num_chunks, meeting_id, duration
                 );
+
+                // Log timing metrics
+                if let Some(ttft) = ttft_us {
+                    let ttft_ms = ttft as f64 / 1000.0;
+                    info!("⏱️ Summary TTFT: {:.2}ms", ttft_ms);
+                }
+                let total_time_ms = total_time_us as f64 / 1000.0;
+                info!("⏱️ Summary Total Time: {:.2}ms", total_time_ms);
+
                 info!("final markdown is {}", &final_markdown);
 
                 // Extract and update meeting name if present
@@ -197,10 +209,16 @@ impl SummaryService {
                     }
                 }
 
-                // Create result JSON with markdown only (summary_json will be added on first edit)
-                let result_json = serde_json::json!({
+                // Create result JSON with markdown and timing metrics (summary_json will be added on first edit)
+                let mut result_json = serde_json::json!({
                     "markdown": final_markdown,
+                    "total_time_us": total_time_us,
                 });
+
+                // Add TTFT if available
+                if let Some(ttft) = ttft_us {
+                    result_json["ttft_us"] = serde_json::json!(ttft);
+                }
 
                 // Update database with completed status
                 if let Err(e) = SummaryProcessesRepository::update_process_completed(

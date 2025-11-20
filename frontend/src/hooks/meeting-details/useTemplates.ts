@@ -10,6 +10,7 @@ export function useTemplates() {
     description: string;
   }>>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('standard_meeting');
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('en');
 
   // Fetch available templates on mount
   useEffect(() => {
@@ -38,9 +39,19 @@ export function useTemplates() {
     Analytics.trackFeatureUsed('template_selected');
   }, []);
 
+  // Handle language selection
+  const handleLanguageSelection = useCallback((languageCode: string) => {
+    setSelectedLanguage(languageCode);
+    toast.success('Language selected', {
+      description: `Output language set to ${languageCode}`,
+    });
+  }, []);
+
   return {
     availableTemplates,
     selectedTemplate,
+    selectedLanguage,
     handleTemplateSelection,
+    handleLanguageSelection,
   };
 }

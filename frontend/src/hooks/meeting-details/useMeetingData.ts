@@ -98,7 +98,11 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
         summary: formattedSummary,
       });
 
-      console.log('✅ Save meeting summary success');
+      console.log('✅ Save meeting summary success - updating aiSummary state');
+
+      // Update the aiSummary state to reflect the saved changes
+      setAiSummary(summary as Summary);
+
     } catch (error) {
       console.error('❌ Failed to save meeting summary:', error);
       if (error instanceof Error) {
@@ -106,8 +110,9 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       } else {
         setError('Failed to save meeting summary: Unknown error');
       }
+      throw error; // Re-throw to let the caller know it failed
     }
-  }, [meeting.id, meetingTitle]);
+  }, [meeting.id, meetingTitle, setAiSummary]);
 
   const saveAllChanges = useCallback(async () => {
     setIsSaving(true);

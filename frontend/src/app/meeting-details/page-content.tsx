@@ -53,6 +53,7 @@ export default function PageContent({
     modelConfig: modelConfig.modelConfig,
     isModelConfigLoading: modelConfig.isLoading,
     selectedTemplate: templates.selectedTemplate,
+    selectedLanguage: templates.selectedLanguage,
     onMeetingUpdated,
     updateMeetingTitle: meetingData.updateMeetingTitle,
     setAiSummary: meetingData.setAiSummary,
@@ -100,7 +101,7 @@ export default function PageContent({
       className="flex flex-col h-screen bg-gray-50"
     >
       <div className="flex flex-1 overflow-hidden">
-      
+
 
         <TranscriptPanel
           transcripts={meetingData.transcripts}
@@ -141,7 +142,9 @@ export default function PageContent({
           getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
           availableTemplates={templates.availableTemplates}
           selectedTemplate={templates.selectedTemplate}
+          selectedLanguage={templates.selectedLanguage}
           onTemplateSelect={templates.handleTemplateSelection}
+          onLanguageSelect={templates.handleLanguageSelection}
           isModelConfigLoading={modelConfig.isLoading}
         />
 

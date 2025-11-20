@@ -7,8 +7,11 @@ import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
+import { ChatPanel } from './ChatPanel';
 import Analytics from '@/lib/analytics';
-import { RefObject } from 'react';
+import { RefObject, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface SummaryPanelProps {
   meeting: {
@@ -44,9 +47,29 @@ interface SummaryPanelProps {
   getSummaryStatusMessage: (status: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error') => string;
   availableTemplates: Array<{id: string, name: string, description: string}>;
   selectedTemplate: string;
+  selectedLanguage: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
+  onLanguageSelect: (languageCode: string) => void;
   isModelConfigLoading?: boolean;
 }
+
+// Helper function to format time (microseconds to human-readable)
+const formatTime = (time_us: number): string => {
+  const time_ms = time_us / 1000;
+
+  if (time_ms < 1000) {
+    return `${time_ms.toFixed(2)}ms`;
+  } else if (time_ms < 60000) {
+    const seconds = (time_ms / 1000).toFixed(2);
+    return `${seconds}s`;
+  } else {
+    const minutes = Math.floor(time_ms / 60000);
+    const remainingMs = time_ms % 60000;
+    const seconds = Math.floor(remainingMs / 1000);
+    const ms = (remainingMs % 1000).toFixed(0);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}.${ms}`;
+  }
+};
 
 export function SummaryPanel({
   meeting,
@@ -78,15 +101,79 @@ export function SummaryPanel({
   getSummaryStatusMessage,
   availableTemplates,
   selectedTemplate,
+  selectedLanguage,
   onTemplateSelect,
+  onLanguageSelect,
   isModelConfigLoading = false
 }: SummaryPanelProps) {
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
+  const [showChat, setShowChat] = useState(false);
+
+  // If chat is shown, render ChatPanel
+  if (showChat) {
+    return (
+      <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
+        {/* Back button */}
+        <div className="p-4 border-b border-gray-200">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowChat(false)}
+            className="gap-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Summary
+          </Button>
+        </div>
+
+        {/* Chat Panel */}
+        <div className="flex-1 overflow-hidden">
+          <ChatPanel
+            meeting={meeting}
+            modelConfig={modelConfig}
+            setModelConfig={setModelConfig}
+            onSaveModelConfig={onSaveModelConfig}
+            isModelConfigLoading={isModelConfigLoading}
+            aiSummary={aiSummary}
+            summaryStatus={summaryStatus}
+            summaryPanelProps={{
+              meetingTitle,
+              onTitleChange,
+              isEditingTitle,
+              onStartEditTitle,
+              onFinishEditTitle,
+              isTitleDirty,
+              summaryRef,
+              isSaving,
+              onSaveAll,
+              onCopySummary,
+              onOpenFolder,
+              transcripts,
+              onGenerateSummary,
+              customPrompt,
+              summaryResponse,
+              onSaveSummary,
+              onSummaryChange,
+              onDirtyChange,
+              summaryError,
+              onRegenerateSummary,
+              getSummaryStatusMessage,
+              availableTemplates,
+              selectedTemplate,
+              selectedLanguage,
+              onTemplateSelect,
+              onLanguageSelect,
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="relative p-4 border-b border-gray-200">
         {/* <EditableTitle
           title={meetingTitle}
           isEditing={isEditingTitle}
@@ -109,9 +196,12 @@ export function SummaryPanel({
                 summaryStatus={summaryStatus}
                 availableTemplates={availableTemplates}
                 selectedTemplate={selectedTemplate}
+                selectedLanguage={selectedLanguage}
                 onTemplateSelect={onTemplateSelect}
+                onLanguageSelect={onLanguageSelect}
                 hasTranscripts={transcripts.length > 0}
                 isModelConfigLoading={isModelConfigLoading}
+                onChatClick={() => setShowChat(true)}
               />
             </div>
 
@@ -147,9 +237,12 @@ export function SummaryPanel({
               summaryStatus={summaryStatus}
               availableTemplates={availableTemplates}
               selectedTemplate={selectedTemplate}
+              selectedLanguage={selectedLanguage}
               onTemplateSelect={onTemplateSelect}
+              onLanguageSelect={onLanguageSelect}
               hasTranscripts={transcripts.length > 0}
               isModelConfigLoading={isModelConfigLoading}
+              onChatClick={() => setShowChat(true)}
             />
           </div>
           {/* Loading spinner */}
@@ -173,9 +266,12 @@ export function SummaryPanel({
               summaryStatus={summaryStatus}
               availableTemplates={availableTemplates}
               selectedTemplate={selectedTemplate}
+              selectedLanguage={selectedLanguage}
               onTemplateSelect={onTemplateSelect}
+              onLanguageSelect={onLanguageSelect}
               hasTranscripts={transcripts.length > 0}
               isModelConfigLoading={isModelConfigLoading}
+              onChatClick={() => setShowChat(true)}
             />
           </div>
           {/* Empty state message */}
@@ -232,6 +328,25 @@ export function SummaryPanel({
               ) : null}
             </div>
           )}
+          {/* Timing Metrics Display - positioned above Summary content block */}
+          {aiSummary && !isSummaryLoading && (() => {
+            const ttft = (aiSummary as any)?.ttft_us;
+            const totalTime = (aiSummary as any)?.total_time_us;
+            // Always show timing metrics if summary exists (even if ttft is None)
+            if (totalTime !== undefined) {
+              return (
+                <div className="px-6 pt-6 pb-2 flex items-center justify-end gap-3">
+                  <span className="text-[10px] text-gray-500 opacity-70">
+                    ttft: {ttft !== undefined && ttft !== null ? formatTime(ttft) : 'N/A'}
+                  </span>
+                  <span className="text-[10px] text-gray-500 opacity-70">
+                    total: {formatTime(totalTime)}
+                  </span>
+                </div>
+              );
+            }
+            return null;
+          })()}
           <div className="p-6 w-full">
             <BlockNoteSummaryView
               ref={summaryRef}

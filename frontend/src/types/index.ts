@@ -79,6 +79,8 @@ export interface BlockNoteBlock {
 export interface SummaryDataResponse {
   markdown?: string;
   summary_json?: BlockNoteBlock[];
+  ttft_us?: number; // Time to first token in microseconds
+  total_time_us?: number; // Total completion time in microseconds (tn - t0)
   // Legacy format fields
   MeetingName?: string;
   _section_order?: string[];

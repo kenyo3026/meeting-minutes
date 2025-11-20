@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Transcript, Summary } from '@/types';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -14,6 +14,7 @@ interface UseSummaryGenerationProps {
   modelConfig: ModelConfig;
   isModelConfigLoading: boolean;
   selectedTemplate: string;
+  selectedLanguage: string;
   onMeetingUpdated?: () => Promise<void>;
   updateMeetingTitle: (title: string) => void;
   setAiSummary: (summary: Summary | null) => void;
@@ -25,6 +26,7 @@ export function useSummaryGeneration({
   modelConfig,
   isModelConfigLoading,
   selectedTemplate,
+  selectedLanguage,
   onMeetingUpdated,
   updateMeetingTitle,
   setAiSummary,
@@ -34,6 +36,18 @@ export function useSummaryGeneration({
   const [originalTranscript, setOriginalTranscript] = useState<string>('');
 
   const { startSummaryPolling } = useSidebar();
+
+  // Use refs to always capture the latest template and language values
+  const selectedTemplateRef = useRef(selectedTemplate);
+  const selectedLanguageRef = useRef(selectedLanguage);
+
+  useEffect(() => {
+    selectedTemplateRef.current = selectedTemplate;
+  }, [selectedTemplate]);
+
+  useEffect(() => {
+    selectedLanguageRef.current = selectedLanguage;
+  }, [selectedLanguage]);
 
   // Helper to get status message
   const getSummaryStatusMessage = useCallback((status: SummaryStatus) => {
@@ -75,7 +89,9 @@ export function useSummaryGeneration({
         setOriginalTranscript(transcriptText);
       }
 
-      console.log('Processing transcript with template:', selectedTemplate);
+      const currentTemplate = selectedTemplateRef.current;
+      const currentLanguage = selectedLanguageRef.current;
+      console.log('Processing transcript with template:', currentTemplate, 'language:', currentLanguage);
 
       // Calculate time since recording
       const timeSinceRecording = (Date.now() - new Date(meeting.created_at).getTime()) / 60000; // minutes
@@ -102,7 +118,8 @@ export function useSummaryGeneration({
         chunkSize: 40000,
         overlap: 1000,
         customPrompt: customPrompt,
-        templateId: selectedTemplate,
+        templateId: currentTemplate,
+        languageId: currentLanguage,
       }) as any;
 
       const process_id = result.process_id;
@@ -148,7 +165,8 @@ export function useSummaryGeneration({
           // Check if backend returned markdown format (new flow)
           if (pollingResult.data.markdown) {
             console.log('📝 Received markdown format from backend');
-            setAiSummary({ markdown: pollingResult.data.markdown } as any);
+            // Include all data fields including ttft_us and total_time_us
+            setAiSummary(pollingResult.data as any);
             setSummaryStatus('completed');
 
             if (meetingName && onMeetingUpdated) {
@@ -281,7 +299,8 @@ export function useSummaryGeneration({
     console.log('🚀 Starting summary generation with config:', {
       provider: modelConfig.provider,
       model: modelConfig.model,
-      template: selectedTemplate
+      template: selectedTemplateRef.current,
+      language: selectedLanguageRef.current
     });
 
     // Check if Ollama provider has models available
@@ -309,7 +328,7 @@ export function useSummaryGeneration({
 
     const fullTranscript = transcripts.map(t => t.text).join('\n');
     await processSummary({ transcriptText: fullTranscript, customPrompt });
-  }, [transcripts, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
+  }, [transcripts, processSummary, modelConfig, isModelConfigLoading]);
 
   // Public API: Regenerate summary from original transcript
   const handleRegenerateSummary = useCallback(async () => {

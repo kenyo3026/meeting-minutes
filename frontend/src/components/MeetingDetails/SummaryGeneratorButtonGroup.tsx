@@ -16,11 +16,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Sparkles, Settings, Loader2, FileText, Check } from 'lucide-react';
+import { Sparkles, Settings, Loader2, FileText, Check, MessageSquare } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useState } from 'react';
+import { TemplateLanguageSelector } from './TemplateLanguageSelector';
 
 interface SummaryGeneratorButtonGroupProps {
   modelConfig: ModelConfig;
@@ -31,9 +32,12 @@ interface SummaryGeneratorButtonGroupProps {
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   availableTemplates: Array<{id: string, name: string, description: string}>;
   selectedTemplate: string;
+  selectedLanguage: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
+  onLanguageSelect: (languageCode: string) => void;
   hasTranscripts?: boolean;
   isModelConfigLoading?: boolean;
+  onChatClick?: () => void;
 }
 
 export function SummaryGeneratorButtonGroup({
@@ -45,12 +49,16 @@ export function SummaryGeneratorButtonGroup({
   summaryStatus,
   availableTemplates,
   selectedTemplate,
+  selectedLanguage,
   onTemplateSelect,
+  onLanguageSelect,
   hasTranscripts = true,
-  isModelConfigLoading = false
+  isModelConfigLoading = false,
+  onChatClick
 }: SummaryGeneratorButtonGroupProps) {
   const [isCheckingModels, setIsCheckingModels] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [templateLanguageDialogOpen, setTemplateLanguageDialogOpen] = useState(false);
 
   if (!hasTranscripts) {
     return null;
@@ -126,7 +134,23 @@ export function SummaryGeneratorButtonGroup({
           </>
         )}
       </Button>
-      
+
+      {/* Chat button */}
+      {onChatClick && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            Analytics.trackButtonClick('open_chat', 'meeting_details');
+            onChatClick();
+          }}
+          title="Chat with AI about this meeting"
+        >
+          <MessageSquare className="h-4 w-4" />
+          <span className="hidden lg:inline">Chat</span>
+        </Button>
+      )}
+
       {/* Settings button */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
         <DialogTrigger asChild>
@@ -157,38 +181,32 @@ export function SummaryGeneratorButtonGroup({
         </DialogContent>
       </Dialog>
 
-      
-
-      {/* Template selector dropdown */}
+      {/* Template selector button */}
       {availableTemplates.length > 0 && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              title="Select summary template"
-            >
-              <FileText />
-              <span className="hidden lg:inline">Template</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {availableTemplates.map((template) => (
-              <DropdownMenuItem
-                key={template.id}
-                onClick={() => onTemplateSelect(template.id, template.name)}
-                title={template.description}
-                className="flex items-center justify-between gap-2"
-              >
-                <span>{template.name}</span>
-                {selectedTemplate === template.id && (
-                  <Check className="h-4 w-4 text-green-600" />
-                )}
-              </DropdownMenuItem>
-            ))}
-
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <>
+          <Button
+            variant="outline"
+            size="sm"
+            title="Select summary template and language"
+            onClick={() => setTemplateLanguageDialogOpen(true)}
+          >
+            <FileText />
+            <span className="hidden lg:inline">Template</span>
+          </Button>
+          <TemplateLanguageSelector
+            open={templateLanguageDialogOpen}
+            onOpenChange={setTemplateLanguageDialogOpen}
+            templates={availableTemplates}
+            selectedTemplate={selectedTemplate}
+            onTemplateSelect={(templateId, templateName) => {
+              onTemplateSelect(templateId, templateName);
+            }}
+            selectedLanguage={selectedLanguage}
+            onLanguageSelect={(languageCode) => {
+              onLanguageSelect(languageCode);
+            }}
+          />
+        </>
       )}
     </ButtonGroup>
   );
