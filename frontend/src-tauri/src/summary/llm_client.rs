@@ -459,6 +459,7 @@ async fn _generate_summary_non_streaming(
     };
 
     info!("🐞 LLM Request to {}: model={} (non-streaming)", provider_name(provider), model_name);
+    info!("🐞 Full request body: {}", serde_json::to_string_pretty(&request_body).unwrap_or_default());
 
     // Send request
     let response = client
@@ -647,6 +648,8 @@ async fn _generate_summary_streaming(
         },
     ];
 
+    info!("🐞 Full messages: {}", serde_json::to_string_pretty(&messages).unwrap_or_default());
+
     let request_body = StreamingChatRequest {
         model: model_name.to_string(),
         messages,
@@ -802,6 +805,7 @@ async fn _generate_summary_streaming_claude(
 
     let api_url = "https://api.anthropic.com/v1/messages";
     info!("🚀 Sending streaming summary request to Claude: {}", api_url);
+    info!("🐞 Full request body: {}", serde_json::to_string_pretty(&request_body).unwrap_or_default());
 
     // Send request
     let response = client
@@ -1075,6 +1079,8 @@ async fn stream_chat_openai_compatible<R: Runtime>(
     );
 
     // Build streaming request body
+    info!("🐞 Full messages: {}", serde_json::to_string_pretty(&messages).unwrap_or_default());
+
     let request_body = StreamingChatRequest {
         model: model_name.to_string(),
         messages,
@@ -1274,6 +1280,7 @@ async fn stream_chat_claude<R: Runtime>(
 
     let api_url = "https://api.anthropic.com/v1/messages";
     info!("🚀 Sending streaming request to Claude: {}", api_url);
+    info!("🐞 Full request body: {}", serde_json::to_string_pretty(&request_body).unwrap_or_default());
 
     // Send request
     let response = client
