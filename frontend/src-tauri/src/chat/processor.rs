@@ -28,7 +28,7 @@ pub async fn get_transcript_chunk_for_chat(
     provider: &LLMProvider,
     model_name: &str,
     ollama_endpoint: Option<&str>,
-    openai_compatible_endpoint: Option<&str>,
+    _openai_compatible_endpoint: Option<&str>,
 ) -> String {
     // Calculate token threshold - same logic as summary/processor
     // Only Ollama uses endpoint for metadata lookup, but we accept openai_compatible_endpoint
@@ -82,6 +82,21 @@ pub async fn get_transcript_chunk_for_chat(
     }
 }
 
+/// Builds the common prompt suffix for chat system prompts
+fn build_chat_prompt_suffix(meeting_title: &str, meeting_date: &str, reference_text: &str) -> String {
+    format!(
+        r#"
+
+You are a helpful AI assistant analyzing a meeting transcript. Here is the meeting information:
+
+Title: {}
+Date: {}
+
+Please answer the user's questions based on the {} above. Be concise and accurate in your responses."#,
+        meeting_title, meeting_date, reference_text
+    )
+}
+
 /// Builds the system prompt for chat based on meeting context
 /// Uses the same layout as summary/processor for KV cache compatibility
 /// Automatically handles chunking using the same logic as summary/processor
@@ -102,7 +117,7 @@ pub async fn build_chat_system_prompt(
     provider: &LLMProvider,
     model_name: &str,
     ollama_endpoint: Option<&str>,
-    openai_compatible_endpoint: Option<&str>,
+    _openai_compatible_endpoint: Option<&str>,
 ) -> String {
     info!("Building chat system prompt for meeting: {}", meeting.id);
 
@@ -125,18 +140,13 @@ pub async fn build_chat_system_prompt(
     let system_prompt = if provider != &LLMProvider::Ollama || total_tokens < token_threshold {
         // Token < threshold: Match summary's final prompt format (uses full transcript with <transcript_chunks>)
         info!("Chat using full transcript (tokens: {} < threshold: {}) - matching summary's final prompt", total_tokens, token_threshold);
+        let prompt_suffix = build_chat_prompt_suffix(&meeting.title, formatted_date, "transcript");
         format!(
             r#"<transcript_chunks>
 {}
-</transcript_chunks>
-
-You are a helpful AI assistant analyzing a meeting transcript. Here is the meeting information:
-
-Title: {}
-Date: {}
-
-Please answer the user's questions based on the transcript above. Be concise and accurate in your responses."#,
-            transcript_text, meeting.title, formatted_date
+</transcript_chunks>{}"#,
+            transcript_text,
+            prompt_suffix
         )
     } else {
         // Token >= threshold: Match summary's chunk prompt format (uses first chunk with <transcript_chunk>)
@@ -147,19 +157,13 @@ Please answer the user's questions based on the transcript above. Be concise and
         } else {
             chunks[0].clone()
         };
-
+        let prompt_suffix = build_chat_prompt_suffix(&meeting.title, formatted_date, "transcript chunk");
         format!(
             r#"<transcript_chunk>
 {}
-</transcript_chunk>
-
-You are a helpful AI assistant analyzing a meeting transcript. Here is the meeting information:
-
-Title: {}
-Date: {}
-
-Please answer the user's questions based on the transcript chunk above. Be concise and accurate in your responses."#,
-            first_chunk, meeting.title, formatted_date
+</transcript_chunk>{}"#,
+            first_chunk,
+            prompt_suffix
         )
     };
 
