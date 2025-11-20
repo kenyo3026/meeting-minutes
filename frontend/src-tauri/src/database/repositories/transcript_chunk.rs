@@ -46,4 +46,26 @@ impl TranscriptChunksRepository {
 
         Ok(())
     }
+
+    /// Gets the full transcript text for a meeting from transcript_chunks table.
+    ///
+    /// # Arguments
+    /// * `pool` - SQLx connection pool
+    /// * `meeting_id` - Meeting identifier
+    ///
+    /// # Returns
+    /// Option<String> - Full transcript text if found, None otherwise
+    pub async fn get_transcript_text(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let result = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT transcript_text FROM transcript_chunks WHERE meeting_id = ?"
+        )
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(result.flatten())
+    }
 }

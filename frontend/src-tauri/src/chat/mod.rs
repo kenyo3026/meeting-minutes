@@ -4,8 +4,10 @@
 /// - Commands for sending chat messages with streaming responses
 /// - Commands for retrieving meeting context
 /// - Integration with existing LLM providers
+/// - System prompt construction and message processing
 
 pub mod commands;
+pub mod processor;
 
 // Re-export Tauri commands
 pub use commands::{

@@ -282,29 +282,14 @@ export function ChatPanel({
     streamingContentRef.current = '';
 
     try {
-      // Build message history with context
-      const chatMessages = [
-        {
-          role: 'system',
-          content: `You are a helpful AI assistant analyzing a meeting transcript. Here is the meeting information:
-
-Title: ${context.title}
-Date: ${new Date(context.created_at).toLocaleString()}
-
-Transcript:
-${context.transcript}
-
-Please answer the user's questions based on this meeting transcript.`
-        },
-        ...messages.map(m => ({
+      // Build message history (only user/assistant messages, no system prompt)
+      // System prompt is now built on the backend from meeting context
+      const userMessages = messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({
           role: m.role,
           content: m.content
-        })),
-        {
-          role: 'user',
-          content: userMessage.content
-        }
-      ];
+        }));
 
       // Get API key (same key used for all providers)
       const apiKey = modelConfig.apiKey || undefined;
@@ -317,11 +302,13 @@ Please answer the user's questions based on this meeting transcript.`
         endpoint = modelConfig.openaiCompatibleEndpoint || undefined;
       }
 
-      // Send chat request
+      // Send chat request with new API format
+      // Backend will build system prompt from meeting context
       await invoke('chat_send_message', {
         request: {
           meeting_id: meeting.id,
-          messages: chatMessages,
+          user_messages: userMessages,
+          current_message: userMessage.content,
           provider: modelConfig.provider,
           model: modelConfig.model,
           api_key: apiKey,

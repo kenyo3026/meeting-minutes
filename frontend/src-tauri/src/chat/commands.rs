@@ -1,5 +1,7 @@
+use crate::chat::processor;
 use crate::database::repositories::{
     meeting::MeetingsRepository,
+    transcript_chunk::TranscriptChunksRepository,
 };
 use crate::state::AppState;
 use crate::summary::llm_client::{ChatMessage, stream_chat, LLMProvider};
@@ -11,7 +13,8 @@ use tauri::{AppHandle, Runtime};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChatRequest {
     pub meeting_id: String,
-    pub messages: Vec<ChatMessage>,
+    pub user_messages: Vec<ChatMessage>,  // Changed: only user/assistant history, no system
+    pub current_message: String,           // New: current user message
     pub provider: String,
     pub model: String,
     pub api_key: Option<String>,
@@ -29,6 +32,7 @@ pub struct ChatResponse {
 /// Send a chat message with streaming response
 ///
 /// This command initiates a streaming chat conversation with the LLM.
+/// The system prompt is constructed automatically from meeting context.
 /// The response will be streamed back via Tauri events:
 /// - `llm:chat:token` for incremental content
 /// - `llm:chat:done` for completion
@@ -46,6 +50,13 @@ pub async fn chat_send_message<R: Runtime>(
         request.model
     );
 
+    // Get meeting context from database
+    let pool = state.db_manager.pool();
+    let meeting = MeetingsRepository::get_meeting(pool, &request.meeting_id)
+        .await
+        .map_err(|e| format!("Failed to get meeting: {}", e))?
+        .ok_or_else(|| format!("Meeting not found: {}", request.meeting_id))?;
+
     // Parse provider
     let provider = match request.provider.as_str() {
         "openai" => LLMProvider::OpenAI,
@@ -56,6 +67,76 @@ pub async fn chat_send_message<R: Runtime>(
         "openai-compatible" => LLMProvider::OpenAICompatible,
         _ => return Err(format!("Unsupported provider: {}", request.provider)),
     };
+
+    // Get endpoint (for Ollama and OpenAI-compatible)
+    let endpoint = request.endpoint.clone();
+
+    // Get transcript text - prefer transcript_chunks for KV cache compatibility with summary
+    // Fallback to combining transcripts table if transcript_chunks doesn't exist
+    let transcript_text = match TranscriptChunksRepository::get_transcript_text(pool, &request.meeting_id).await {
+        Ok(Some(text)) if !text.is_empty() => {
+            log_info!("Using transcript from transcript_chunks (KV cache compatible)");
+            text
+        }
+        Ok(Some(_)) | Ok(None) => {
+            log_info!("transcript_chunks not found, falling back to transcripts table");
+            // Fallback: combine transcripts from transcripts table
+            meeting
+                .transcripts
+                .iter()
+                .map(|t| t.text.as_str())
+                .collect::<Vec<&str>>()
+                .join("\n")
+        }
+        Err(e) => {
+            log_error!("Failed to get transcript from transcript_chunks: {}, falling back", e);
+            // Fallback: combine transcripts from transcripts table
+            meeting
+                .transcripts
+                .iter()
+                .map(|t| t.text.as_str())
+                .collect::<Vec<&str>>()
+                .join("\n")
+        }
+    };
+
+    // Get endpoint (for Ollama and OpenAI-compatible)
+    let endpoint = request.endpoint.clone();
+
+    // Separate endpoints for Ollama and OpenAI-compatible
+    let ollama_endpoint = if provider == LLMProvider::Ollama {
+        endpoint.as_deref()
+    } else {
+        None
+    };
+
+    let openai_compatible_endpoint = if provider == LLMProvider::OpenAICompatible {
+        endpoint.as_deref()
+    } else {
+        None
+    };
+
+    // Build complete message history with system prompt
+    // Chunking logic is handled inside processor::build_chat_messages
+    let messages = processor::build_chat_messages(
+        &meeting,
+        &transcript_text,
+        &provider,
+        &request.model,
+        ollama_endpoint,
+        openai_compatible_endpoint,
+        request.user_messages.clone(),
+        &request.current_message,
+    )
+    .await;
+
+    // Validate messages
+    processor::validate_chat_messages(&messages)?;
+
+    log_info!(
+        "Built {} messages for chat (including system prompt)",
+        messages.len()
+    );
 
     // Get API key from request or settings
     let api_key = if let Some(key) = request.api_key {
@@ -69,31 +150,27 @@ pub async fn chat_send_message<R: Runtime>(
         }
     };
 
-    // Get endpoint (for Ollama and OpenAI-compatible)
-    let endpoint = request.endpoint.clone();
-
     // Use meeting_id as request_id for streaming events
     let request_id = request.meeting_id.clone();
+
+    // Set default parameters if not provided
+    let temperature = request.temperature.unwrap_or(0.7);
+    let max_tokens = request.max_tokens.unwrap_or(2048);
 
     // Create HTTP client
     let client = Client::new();
 
     // Spawn background task for streaming
+    // Clone endpoints for move into async block
+    let ollama_endpoint_clone = ollama_endpoint.map(|s| s.to_string());
+    let openai_compatible_endpoint_clone = openai_compatible_endpoint.map(|s| s.to_string());
+
     tauri::async_runtime::spawn(async move {
         log_info!("Starting streaming chat for request_id: {}", request_id);
 
-        // Separate endpoints for Ollama and OpenAI-compatible
-        let ollama_endpoint = if provider == LLMProvider::Ollama {
-            endpoint.as_deref()
-        } else {
-            None
-        };
-
-        let openai_compatible_endpoint = if provider == LLMProvider::OpenAICompatible {
-            endpoint.as_deref()
-        } else {
-            None
-        };
+        // Use cloned endpoints
+        let ollama_endpoint = ollama_endpoint_clone.as_deref();
+        let openai_compatible_endpoint = openai_compatible_endpoint_clone.as_deref();
 
         match stream_chat(
             app.clone(),
@@ -101,13 +178,13 @@ pub async fn chat_send_message<R: Runtime>(
             &provider,
             &request.model,
             &api_key,
-            request.messages,
+            messages,
             request_id.clone(),
             ollama_endpoint,
             openai_compatible_endpoint,
-            request.temperature,
+            Some(temperature),
             None, // top_p
-            request.max_tokens,
+            Some(max_tokens),
         )
         .await
         {
