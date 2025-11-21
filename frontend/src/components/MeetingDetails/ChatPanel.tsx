@@ -205,33 +205,38 @@ export function ChatPanel({
       doneUnlisten = await listen('llm:chat:done', async (event: any) => {
         const { request_id, ttft_us } = event.payload;
         if (request_id === meeting.id) {
-          // Get the final assistant message and save to database
+          // Update UI state with final content and TTFT
           setMessages(prev => {
             const newMessages = [...prev];
             if (newMessages.length > 0 && newMessages[newMessages.length - 1].role === 'assistant') {
-              // Update with TTFT if available
+              // Update with TTFT if available and use streamingContentRef for complete content
+              const lastMessage: Message = {
+                ...newMessages[newMessages.length - 1],
+                content: streamingContentRef.current // Use ref to ensure complete content
+              };
               if (ttft_us !== undefined) {
-                newMessages[newMessages.length - 1] = {
-                  ...newMessages[newMessages.length - 1],
-                  ttft_us: ttft_us
-                };
+                lastMessage.ttft_us = ttft_us;
               }
-
-              // Save to database (async, don't block UI)
-              const finalMessage = newMessages[newMessages.length - 1];
-              invoke('chat_save_message', {
-                meetingId: meeting.id,
-                role: finalMessage.role,
-                content: finalMessage.content,
-                ttftUs: finalMessage.ttft_us ?? null
-              }).then(() => {
-                console.log('Assistant message saved to database');
-              }).catch(error => {
-                console.error('Failed to save assistant message:', error);
-              });
+              newMessages[newMessages.length - 1] = lastMessage;
             }
             return newMessages;
           });
+
+          // Save assistant message to database (await to ensure consistency with summary pattern)
+          // Always use streamingContentRef.current as it's the source of truth for complete content
+          if (streamingContentRef.current.length > 0) {
+            try {
+              await invoke('chat_save_message', {
+                meetingId: meeting.id,
+                role: 'assistant',
+                content: streamingContentRef.current,
+                ttftUs: ttft_us ?? null
+              });
+            } catch (error) {
+              console.error('Failed to save assistant message:', error);
+              toast.error('Failed to save assistant message to database');
+            }
+          }
 
           setIsLoading(false);
         }
@@ -305,17 +310,17 @@ export function ChatPanel({
     setInput('');
     setIsLoading(true);
 
-    // Save user message to database (async, don't block)
-    invoke('chat_save_message', {
-      meetingId: meeting.id,
-      role: 'user',
-      content: userMessage.content,
-      ttftUs: null
-    }).then(() => {
-      console.log('User message saved to database');
-    }).catch(error => {
+    try {
+      await invoke('chat_save_message', {
+        meetingId: meeting.id,
+        role: 'user',
+        content: userMessage.content,
+        ttftUs: null
+      });
+    } catch (error) {
       console.error('Failed to save user message:', error);
-    });
+      toast.error('Failed to save user message to database');
+    }
 
     // Re-enable auto-scroll when sending a new message
     shouldAutoScrollRef.current = true;
