@@ -1,7 +1,7 @@
 use crate::database::models::ChatMessageModel;
 use chrono::Utc;
 use sqlx::SqlitePool;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 pub struct ChatMessagesRepository;
@@ -23,6 +23,7 @@ impl ChatMessagesRepository {
     }
 
     /// Saves a single chat message
+    /// Uses a transaction to ensure data consistency and verify meeting exists
     pub async fn save_message(
         pool: &SqlitePool,
         meeting_id: &str,
@@ -30,6 +31,24 @@ impl ChatMessagesRepository {
         content: &str,
         ttft_us: Option<i64>,
     ) -> Result<String, sqlx::Error> {
+        let mut transaction = pool.begin().await?;
+
+        // Verify meeting exists before inserting message
+        let meeting_exists: bool = sqlx::query("SELECT 1 FROM meetings WHERE id = ?")
+            .bind(meeting_id)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .is_some();
+
+        if !meeting_exists {
+            info!(
+                "Attempted to save chat message for a non-existent meeting_id: {}",
+                meeting_id
+            );
+            transaction.rollback().await?;
+            return Err(sqlx::Error::RowNotFound);
+        }
+
         let message_id = format!("chat-msg-{}", Uuid::new_v4());
         let now = Utc::now();
 
@@ -50,23 +69,41 @@ impl ChatMessagesRepository {
         .bind(content)
         .bind(now)
         .bind(ttft_us)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await?;
+
+        transaction.commit().await?;
+
+        info!(
+            "Successfully saved chat message {} for meeting_id: {}",
+            message_id, meeting_id
+        );
 
         Ok(message_id)
     }
 
     /// Clears all chat messages for a meeting
+    /// Uses a transaction to ensure data consistency
     pub async fn clear_history(
         pool: &SqlitePool,
         meeting_id: &str,
     ) -> Result<u64, sqlx::Error> {
         info!("Clearing chat history for meeting_id: {}", meeting_id);
 
+        let mut transaction = pool.begin().await?;
+
         let result = sqlx::query("DELETE FROM chat_messages WHERE meeting_id = ?")
             .bind(meeting_id)
-            .execute(pool)
+            .execute(&mut *transaction)
             .await?;
+
+        transaction.commit().await?;
+
+        info!(
+            "Successfully cleared {} chat messages for meeting_id: {}",
+            result.rows_affected(),
+            meeting_id
+        );
 
         Ok(result.rows_affected())
     }
