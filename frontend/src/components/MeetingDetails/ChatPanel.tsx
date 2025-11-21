@@ -138,7 +138,7 @@ export function ChatPanel({
     const loadData = async () => {
       try {
         // Load meeting context
-        const meetingContext = await invoke<MeetingContext>('chat_get_meeting_context', {
+        const meetingContext = await invoke<MeetingContext>('api_chat_get_meeting_context', {
           meetingId: meeting.id
         });
         setContext(meetingContext);
@@ -150,7 +150,7 @@ export function ChatPanel({
           content: string;
           timestamp: string;
           ttft_us?: number;
-        }>>('chat_get_history', {
+        }>>('api_chat_get_history', {
           meetingId: meeting.id
         });
 
@@ -229,7 +229,7 @@ export function ChatPanel({
           // Always use streamingContentRef.current as it's the source of truth for complete content
           if (streamingContentRef.current.length > 0) {
             try {
-              await invoke('chat_save_message', {
+              await invoke('api_chat_save_message', {
                 meetingId: meeting.id,
                 role: 'assistant',
                 content: streamingContentRef.current,
@@ -329,7 +329,7 @@ export function ChatPanel({
     setIsLoading(true);
 
     try {
-      await invoke('chat_save_message', {
+      await invoke('api_chat_save_message', {
         meetingId: meeting.id,
         role: 'user',
         content: userMessage.content,
@@ -382,7 +382,7 @@ export function ChatPanel({
 
       // Send chat request with new API format
       // Backend will build system prompt from meeting context
-      await invoke('chat_send_message', {
+      await invoke('api_chat_send_message', {
         request: {
           meeting_id: meeting.id,
           user_messages: userMessages,
@@ -422,7 +422,7 @@ export function ChatPanel({
     if (window.confirm('Are you sure you want to clear all chat history? This action cannot be undone.')) {
       try {
         // Clear from database
-        await invoke('chat_clear_history', {
+        await invoke('api_chat_clear_history', {
           meetingId: meeting.id
         });
 

@@ -12,7 +12,7 @@ pub mod processor;
 
 // Re-export Tauri commands for use in lib.rs
 pub use commands::{
-    chat_clear_history, chat_get_history, chat_get_meeting_context, chat_save_message,
-    chat_send_message, __cmd__chat_clear_history, __cmd__chat_get_history,
-    __cmd__chat_get_meeting_context, __cmd__chat_save_message, __cmd__chat_send_message,
+    api_chat_clear_history, api_chat_get_history, api_chat_get_meeting_context, api_chat_save_message,
+    api_chat_send_message, __cmd__api_chat_clear_history, __cmd__api_chat_get_history,
+    __cmd__api_chat_get_meeting_context, __cmd__api_chat_save_message, __cmd__api_chat_send_message,
 };
