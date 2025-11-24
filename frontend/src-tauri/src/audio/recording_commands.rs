@@ -286,6 +286,10 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
             Ok(device) => Some(Arc::new(device)),
             Err(e) => {
                 warn!("⚠️ Failed to get default microphone device: {}", e);
+                // For MicrophoneOnly mode, microphone is required - fail early with clear error
+                if mode == RecordingMode::MicrophoneOnly {
+                    return Err(format!("No microphone device available. Please connect a microphone or select a different recording mode."));
+                }
                 None
             }
         }
@@ -303,6 +307,10 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
             Ok(device) => Some(Arc::new(device)),
             Err(e) => {
                 warn!("⚠️ Failed to get default system audio device: {}", e);
+                // For SystemAudioOnly mode, system audio is required - fail early with clear error
+                if mode == RecordingMode::SystemAudioOnly {
+                    return Err(format!("No system audio device available. Please configure system audio capture or select a different recording mode."));
+                }
                 None
             }
         }
@@ -314,6 +322,26 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
           mode,
           mic_device.as_ref().map(|d| d.name.as_str()),
           system_device.as_ref().map(|d| d.name.as_str()));
+
+    // Validate that required devices are available based on recording mode
+    // This ensures we fail early with clear error messages before attempting to start recording
+    match mode {
+        RecordingMode::MicrophoneOnly => {
+            if mic_device.is_none() {
+                return Err("Microphone is required for microphone-only recording mode. Please connect a microphone or select a different recording mode.".to_string());
+            }
+        }
+        RecordingMode::SystemAudioOnly => {
+            if system_device.is_none() {
+                return Err("System audio device is required for system-audio-only recording mode. Please configure system audio capture or select a different recording mode.".to_string());
+            }
+        }
+        RecordingMode::Mixed => {
+            if mic_device.is_none() && system_device.is_none() {
+                return Err("At least one audio device (microphone or system audio) is required for mixed recording mode.".to_string());
+            }
+        }
+    }
 
     // Async-first approach for custom devices - no more blocking operations!
     info!("🚀 Starting async recording initialization with custom devices");

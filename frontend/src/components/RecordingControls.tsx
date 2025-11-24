@@ -53,6 +53,13 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const [speechDetected, setSpeechDetected] = useState(false);
   const [deviceError, setDeviceError] = useState<{title: string, message: string} | null>(null);
 
+  // Default devices object for when selectedDevices is undefined
+  const defaultDevices: SelectedDevices = {
+    micDevice: null,
+    systemDevice: null,
+    recordingMode: DEFAULT_RECORDING_MODE
+  };
+
   const currentTime = 0;
   const duration = 0;
   const isPlaying = false;
@@ -106,7 +113,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       // Use the correct command with device parameters
       if (selectedDevices || meetingName || generatedMeetingTitle) {
         // Filter devices based on recording mode using shared utility function
-        const { micDeviceName, systemDeviceName, recordingMode } = filterDevicesByRecordingMode(selectedDevices || {});
+        const { micDeviceName, systemDeviceName, recordingMode } = filterDevicesByRecordingMode(selectedDevices || defaultDevices);
         // Defensive check: Ensure recordingMode always has a value
         // Tauri will map camelCase keys to snake_case for Rust commands, so use camelCase here
         const finalRecordingMode = recordingMode || DEFAULT_RECORDING_MODE;
@@ -143,22 +150,47 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       const errorMsg = error instanceof Error ? error.message : String(error);
 
       // Get recording mode to determine which errors are relevant
-      const { recordingMode: currentRecordingMode } = filterDevicesByRecordingMode(selectedDevices || {});
+      const { recordingMode: currentRecordingMode } = filterDevicesByRecordingMode(selectedDevices || defaultDevices);
       const finalMode = currentRecordingMode || DEFAULT_RECORDING_MODE;
       const needsMicrophone = finalMode === 'microphone-only' || finalMode === 'mixed';
       const needsSystemAudio = finalMode === 'system-audio-only' || finalMode === 'mixed';
 
       // Check for device-related errors
-      if ((errorMsg.includes('microphone') || errorMsg.includes('mic') || errorMsg.includes('input')) && needsMicrophone) {
-        setDeviceError({
-          title: 'Microphone Not Available',
-          message: 'Unable to access your microphone. Please check that:\n• Your microphone is connected\n• The app has microphone permissions\n• No other app is using the microphone'
-        });
-      } else if ((errorMsg.includes('system audio') || errorMsg.includes('speaker') || errorMsg.includes('output')) && needsSystemAudio) {
-        setDeviceError({
-          title: 'System Audio Not Available',
-          message: 'Unable to capture system audio. Please check that:\n• A virtual audio device (like BlackHole) is installed\n• The app has screen recording permissions (macOS)\n• System audio is properly configured'
-        });
+      // Define error keywords and messages to avoid duplication
+      const micKeywords = ['microphone', 'mic', 'input', 'No microphone device available', 'Microphone is required'];
+      const systemAudioKeywords = ['system audio', 'speaker', 'output', 'No system audio device available', 'System audio device is required'];
+      
+      const micError = {
+        title: 'Microphone Not Available',
+        message: 'Unable to access your microphone. Please check that:\n• Your microphone is connected\n• The app has microphone permissions\n• No other app is using the microphone'
+      };
+      
+      const systemAudioError = {
+        title: 'System Audio Not Available',
+        message: 'Unable to capture system audio. Please check that:\n• A virtual audio device (like BlackHole) is installed\n• The app has screen recording permissions (macOS)\n• System audio is properly configured'
+      };
+
+      // Match errors using keyword arrays
+      const hasMicError = needsMicrophone && micKeywords.some(keyword => errorMsg.includes(keyword));
+      const hasSystemAudioError = needsSystemAudio && systemAudioKeywords.some(keyword => errorMsg.includes(keyword));
+      const hasStreamError = errorMsg.includes('No audio streams could be created') || errorMsg.includes('At least one audio device');
+
+      if (hasMicError) {
+        setDeviceError(micError);
+      } else if (hasSystemAudioError) {
+        setDeviceError(systemAudioError);
+      } else if (hasStreamError) {
+        // Determine error based on recording mode
+        if (needsMicrophone && !needsSystemAudio) {
+          setDeviceError(micError);
+        } else if (!needsMicrophone && needsSystemAudio) {
+          setDeviceError(systemAudioError);
+        } else {
+          setDeviceError({
+            title: 'Recording Failed',
+            message: 'Unable to start recording. Please check your audio device settings and try again.'
+          });
+        }
       } else if (errorMsg.includes('permission')) {
         setDeviceError({
           title: 'Permission Required',
