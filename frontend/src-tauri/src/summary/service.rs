@@ -47,63 +47,89 @@ impl SummaryService {
     ) {
         let start_time = Instant::now();
         info!(
-            "🚀 Starting background processing for meeting_id: {}",
-            meeting_id
+            "🚀 Starting background processing for meeting_id: {}, provider: {}, model_name: {}",
+            meeting_id, model_provider, model_name
         );
 
         // Parse provider
         let provider = match LLMProvider::from_str(&model_provider) {
-            Ok(p) => p,
+            Ok(p) => {
+                info!("✓ Parsed provider: {:?}", p);
+                p
+            }
             Err(e) => {
-                Self::update_process_failed(&pool, &meeting_id, &e).await;
+                let err_msg = format!("Failed to parse provider '{}': {}", model_provider, e);
+                error!("❌ {}", err_msg);
+                Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
                 return;
             }
         };
 
         // Validate and setup api_key, Flexible for Ollama
         let api_key = match SettingsRepository::get_api_key(&pool, &model_provider).await {
-            Ok(Some(key)) if !key.is_empty() => key,
+            Ok(Some(key)) if !key.is_empty() => {
+                info!("✓ Retrieved API key for {} (length: {})", &model_provider, key.len());
+                key
+            }
             Ok(None) | Ok(Some(_)) => {
                 if provider != LLMProvider::Ollama {
                     let err_msg = format!("Api key not found for {}", &model_provider);
+                    error!("❌ {}", err_msg);
                     Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
                     return;
                 }
+                info!("✓ No API key needed for Ollama provider");
                 String::new()
             }
             Err(e) => {
                 let err_msg = format!("Failed to retrieve api key for {} : {}", &model_provider, e);
+                error!("❌ {}", err_msg);
                 Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
                 return;
             }
         };
 
-        // Get Ollama endpoint if provider is Ollama
-        let ollama_endpoint = if provider == LLMProvider::Ollama {
-            match SettingsRepository::get_model_config(&pool).await {
-                Ok(Some(config)) => config.ollama_endpoint,
-                Ok(None) => None,
-                Err(e) => {
-                    info!("Failed to retrieve Ollama endpoint: {}, using default", e);
-                    None
-                }
+        // Get model config once and extract endpoints based on provider
+        let (ollama_endpoint, openai_compatible_endpoint) = match SettingsRepository::get_model_config(&pool).await {
+            Ok(Some(config)) => {
+                info!(
+                    "✓ Retrieved model config: ollama_endpoint={:?}, openai_compatible_endpoint={:?}",
+                    config.ollama_endpoint, config.openai_compatible_endpoint
+                );
+                (config.ollama_endpoint, config.openai_compatible_endpoint)
             }
-        } else {
-            None
+            Ok(None) => {
+                warn!("⚠️ Model config not found in database, endpoints will be None");
+                (None, None)
+            }
+            Err(e) => {
+                warn!("⚠️ Failed to retrieve model config: {}, endpoints will be None", e);
+                (None, None)
+            }
         };
 
-        // Get OpenAI Compatible endpoint if provider is OpenAI Compatible
-        let openai_compatible_endpoint = if provider == LLMProvider::OpenAICompatible {
-            match SettingsRepository::get_model_config(&pool).await {
-                Ok(Some(config)) => config.openai_compatible_endpoint,
-                Ok(None) => None,
-                Err(e) => {
-                    info!("Failed to retrieve OpenAI Compatible endpoint: {}, using None", e);
-                    None
+        // Log which endpoint will be used based on provider
+        match provider {
+            LLMProvider::Ollama => {
+                if let Some(ref ep) = ollama_endpoint {
+                    info!("✓ Using Ollama endpoint: {}", ep);
+                } else {
+                    warn!("⚠️ Ollama endpoint not configured, will use default (localhost:11434)");
                 }
             }
-        } else {
-            None
+            LLMProvider::OpenAICompatible => {
+                if let Some(ref ep) = openai_compatible_endpoint {
+                    info!("✓ Using OpenAI Compatible endpoint: {}", ep);
+                } else {
+                    error!("❌ OpenAI Compatible endpoint not configured in database");
+                    let err_msg = "OpenAI Compatible endpoint not configured".to_string();
+                    Self::update_process_failed(&pool, &meeting_id, &err_msg).await;
+                    return;
+                }
+            }
+            _ => {
+                // Other providers don't need custom endpoints
+            }
         };
 
         // Dynamically fetch context size for Ollama models
@@ -132,6 +158,17 @@ impl SummaryService {
         };
 
         // Generate summary
+        info!(
+            "📝 Calling generate_meeting_summary with: provider={:?}, model_name={}, template_id={}, language_id={}, token_threshold={}, text_length={}",
+            provider, model_name, template_id, language_id, token_threshold, text.len()
+        );
+        if let Some(ref ep) = ollama_endpoint {
+            info!("  → Ollama endpoint: {}", ep);
+        }
+        if let Some(ref ep) = openai_compatible_endpoint {
+            info!("  → OpenAI Compatible endpoint: {}", ep);
+        }
+        
         let client = reqwest::Client::new();
         let result = generate_meeting_summary(
             &client,
