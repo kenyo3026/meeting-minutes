@@ -1,5 +1,6 @@
 use crate::chat::processor;
 use crate::database::repositories::{
+    chat_message::ChatMessagesRepository,
     meeting::MeetingsRepository,
     transcript_chunk::TranscriptChunksRepository,
 };
@@ -38,13 +39,13 @@ pub struct ChatResponse {
 /// - `llm:chat:done` for completion
 /// - `llm:chat:error` for errors
 #[tauri::command]
-pub async fn chat_send_message<R: Runtime>(
+pub async fn api_chat_send_message<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     request: ChatRequest,
 ) -> Result<ChatResponse, String> {
     log_info!(
-        "chat_send_message called for meeting_id: {}, provider: {}, model: {}",
+        "api_chat_send_message called for meeting_id: {}, provider: {}, model: {}",
         request.meeting_id,
         request.provider,
         request.model
@@ -206,12 +207,12 @@ pub async fn chat_send_message<R: Runtime>(
 
 /// Get meeting context (title and transcript) for chat
 #[tauri::command]
-pub async fn chat_get_meeting_context<R: Runtime>(
+pub async fn api_chat_get_meeting_context<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
 ) -> Result<MeetingContext, String> {
-    log_info!("chat_get_meeting_context called for meeting_id: {}", meeting_id);
+    log_info!("api_chat_get_meeting_context called for meeting_id: {}", meeting_id);
 
     let pool = state.db_manager.pool();
 
@@ -237,6 +238,72 @@ pub async fn chat_get_meeting_context<R: Runtime>(
     })
 }
 
+/// Get chat history for a meeting
+#[tauri::command]
+pub async fn api_chat_get_history<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Vec<ChatHistoryMessage>, String> {
+    log_info!("api_chat_get_history called for meeting_id: {}", meeting_id);
+
+    let pool = state.db_manager.pool();
+
+    let messages = ChatMessagesRepository::get_chat_history(pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to get chat history: {}", e))?;
+
+    Ok(messages
+        .into_iter()
+        .map(|m| ChatHistoryMessage {
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: m.created_at.to_rfc3339(),
+            ttft_us: m.ttft_us,
+        })
+        .collect())
+}
+
+/// Save a chat message to database
+#[tauri::command]
+pub async fn api_chat_save_message<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    role: String,
+    content: String,
+    ttft_us: Option<i64>,
+) -> Result<String, String> {
+    log_info!(
+        "api_chat_save_message called for meeting_id: {}, role: {}",
+        meeting_id,
+        role
+    );
+
+    let pool = state.db_manager.pool();
+
+    ChatMessagesRepository::save_message(pool, &meeting_id, &role, &content, ttft_us)
+        .await
+        .map_err(|e| format!("Failed to save chat message: {}", e))
+}
+
+/// Clear all chat history for a meeting
+#[tauri::command]
+pub async fn api_chat_clear_history<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<u64, String> {
+    log_info!("api_chat_clear_history called for meeting_id: {}", meeting_id);
+
+    let pool = state.db_manager.pool();
+
+    ChatMessagesRepository::clear_history(pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to clear chat history: {}", e))
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MeetingContext {
     pub id: String,
@@ -244,5 +311,14 @@ pub struct MeetingContext {
     pub created_at: String,
     pub updated_at: String,
     pub transcript: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChatHistoryMessage {
+    pub id: String,
+    pub role: String,
+    pub content: String,
+    pub timestamp: String,
+    pub ttft_us: Option<i64>,
 }
 

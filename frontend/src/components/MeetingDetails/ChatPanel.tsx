@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { MessageSquare, Send, FileText, ChevronDown, ChevronUp, Maximize2 } from 'lucide-react';
+import { MessageSquare, Send, FileText, ChevronDown, ChevronUp, Maximize2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { Summary, Transcript } from '@/types';
@@ -133,21 +133,48 @@ export function ChatPanel({
     updatePreview();
   }, [aiSummary, previewEditor]);
 
-  // Load meeting context on mount
+  // Load meeting context and chat history on mount
   useEffect(() => {
-    const loadContext = async () => {
+    const loadData = async () => {
       try {
-        const meetingContext = await invoke<MeetingContext>('chat_get_meeting_context', {
+        // Load meeting context
+        const meetingContext = await invoke<MeetingContext>('api_chat_get_meeting_context', {
           meetingId: meeting.id
         });
         setContext(meetingContext);
+
+        // Load chat history from database
+        const history = await invoke<Array<{
+          id: string;
+          role: string;
+          content: string;
+          timestamp: string;
+          ttft_us?: number;
+        }>>('api_chat_get_history', {
+          meetingId: meeting.id
+        });
+
+        // Convert history to Message format
+        const loadedMessages: Message[] = history.map(h => ({
+          id: h.id,
+          role: h.role as 'user' | 'assistant',
+          content: h.content,
+          timestamp: new Date(h.timestamp),
+          ttft_us: h.ttft_us
+        }));
+
+        setMessages(loadedMessages);
+        console.log(`Loaded ${loadedMessages.length} messages from database`);
       } catch (error) {
-        console.error('Failed to load meeting context:', error);
-        toast.error('Failed to load meeting transcript');
+        console.error('Failed to load chat data:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        toast.error('Failed to load chat history', {
+          description: errorMessage
+        });
       }
     };
 
-    loadContext();
+    loadData();
   }, [meeting.id]);
 
   // Set up streaming event listeners
@@ -178,22 +205,46 @@ export function ChatPanel({
       });
 
       // Listen for completion
-      doneUnlisten = await listen('llm:chat:done', (event: any) => {
+      doneUnlisten = await listen('llm:chat:done', async (event: any) => {
         const { request_id, ttft_us } = event.payload;
         if (request_id === meeting.id) {
-          // Update the last assistant message with TTFT
-          if (ttft_us !== undefined) {
-            setMessages(prev => {
-              const newMessages = [...prev];
-              if (newMessages.length > 0 && newMessages[newMessages.length - 1].role === 'assistant') {
-                newMessages[newMessages.length - 1] = {
-                  ...newMessages[newMessages.length - 1],
-                  ttft_us: ttft_us
-                };
+          // Update UI state with final content and TTFT
+          setMessages(prev => {
+            const newMessages = [...prev];
+            if (newMessages.length > 0 && newMessages[newMessages.length - 1].role === 'assistant') {
+              // Update with TTFT if available and use streamingContentRef for complete content
+              const lastMessage: Message = {
+                ...newMessages[newMessages.length - 1],
+                content: streamingContentRef.current // Use ref to ensure complete content
+              };
+              if (ttft_us !== undefined) {
+                lastMessage.ttft_us = ttft_us;
               }
-              return newMessages;
-            });
+              newMessages[newMessages.length - 1] = lastMessage;
+            }
+            return newMessages;
+          });
+
+          // Save assistant message to database (await to ensure consistency with summary pattern)
+          // Always use streamingContentRef.current as it's the source of truth for complete content
+          if (streamingContentRef.current.length > 0) {
+            try {
+              await invoke('api_chat_save_message', {
+                meetingId: meeting.id,
+                role: 'assistant',
+                content: streamingContentRef.current,
+                ttftUs: ttft_us ?? null
+              });
+              console.log('Assistant message saved to database');
+            } catch (error) {
+              console.error('Failed to save assistant message:', error);
+              const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+              toast.error('Failed to save assistant message', {
+                description: errorMessage
+              });
+            }
           }
+
           setIsLoading(false);
         }
       });
@@ -203,9 +254,20 @@ export function ChatPanel({
         const { request_id, message } = event.payload;
         if (request_id === meeting.id) {
           console.error('Chat streaming error:', message);
-          toast.error(`Chat error: ${message}`);
+          const errorMessage = message || 'Unknown error occurred during chat streaming';
+          toast.error('Chat streaming error', {
+            description: errorMessage
+          });
           setIsLoading(false);
           streamingContentRef.current = '';
+
+          // Remove the placeholder assistant message on error
+          setMessages(prev => {
+            if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === '') {
+              return prev.slice(0, -1);
+            }
+            return prev;
+          });
         }
       });
     };
@@ -266,6 +328,22 @@ export function ChatPanel({
     setInput('');
     setIsLoading(true);
 
+    try {
+      await invoke('api_chat_save_message', {
+        meetingId: meeting.id,
+        role: 'user',
+        content: userMessage.content,
+        ttftUs: null
+      });
+      console.log('User message saved to database');
+    } catch (error) {
+      console.error('Failed to save user message:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      toast.error('Failed to save user message', {
+        description: errorMessage
+      });
+    }
+
     // Re-enable auto-scroll when sending a new message
     shouldAutoScrollRef.current = true;
 
@@ -304,7 +382,7 @@ export function ChatPanel({
 
       // Send chat request with new API format
       // Backend will build system prompt from meeting context
-      await invoke('chat_send_message', {
+      await invoke('api_chat_send_message', {
         request: {
           meeting_id: meeting.id,
           user_messages: userMessages,
@@ -320,7 +398,10 @@ export function ChatPanel({
 
     } catch (error) {
       console.error('Failed to send chat message:', error);
-      toast.error('Failed to send message');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      toast.error('Failed to send message', {
+        description: errorMessage
+      });
       setIsLoading(false);
 
       // Remove the placeholder assistant message on error
@@ -332,6 +413,29 @@ export function ChatPanel({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  const handleClearHistory = async () => {
+    if (messages.length === 0) return;
+
+    if (window.confirm('Are you sure you want to clear all chat history? This action cannot be undone.')) {
+      try {
+        // Clear from database
+        await invoke('api_chat_clear_history', {
+          meetingId: meeting.id
+        });
+
+        // Clear from state
+        setMessages([]);
+        toast.success('Chat history cleared');
+      } catch (error) {
+        console.error('Failed to clear chat history:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        toast.error('Failed to clear chat history', {
+          description: errorMessage
+        });
+      }
     }
   };
 
@@ -498,8 +602,20 @@ export function ChatPanel({
               <MessageSquare className="h-5 w-5 text-blue-600" />
               <h2 className="text-lg font-semibold text-gray-900">Chat with AI</h2>
             </div>
-            <div className="text-sm text-gray-500">
-              {modelConfig.provider} • {modelConfig.model}
+            <div className="flex items-center gap-3">
+              <div className="text-sm text-gray-500">
+                {modelConfig.provider} • {modelConfig.model}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearHistory}
+                disabled={messages.length === 0 || isLoading}
+                className="h-8 px-2 text-gray-500 hover:text-red-600 hover:bg-red-50"
+                title="Clear chat history"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
             </div>
           </div>
         </div>

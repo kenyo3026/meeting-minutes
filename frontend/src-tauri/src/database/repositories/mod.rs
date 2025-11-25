@@ -1,3 +1,4 @@
+pub mod chat_message;
 pub mod meeting;
 pub mod setting;
 pub mod summary;

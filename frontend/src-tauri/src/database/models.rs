@@ -65,6 +65,16 @@ pub struct TranscriptChunk {
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct ChatMessageModel {
+    pub id: String,
+    pub meeting_id: String,
+    pub role: String,
+    pub content: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub ttft_us: Option<i64>,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct Setting {
     pub id: String,
     pub provider: String,
