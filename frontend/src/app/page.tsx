@@ -109,7 +109,7 @@ export default function Home() {
   // Auto Summary feature status
   const [autoSummaryInterval, setAutoSummaryInterval] = useState<NodeJS.Timeout | null>(null);
   const AUTO_SUMMARY_MINUTES = 5; // Every N minute auto-generate summary (configurable)
-  // 🆕 Use ref to avoid closure issues, allowing listeners to get the latest meeting ID
+  // Use ref to avoid closure issues, allowing listeners to get the latest meeting ID
   const currentMeetingIdRef = useRef<string | null>(null);
 
   // Permission check hook
@@ -147,6 +147,14 @@ export default function Home() {
 
   // Ref for the transcript scrollable container
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
+
+  // Draggable recording panel state (for split view mode only)
+  const [recordingPanelPosition, setRecordingPanelPosition] = useState<{ x: number; y: number } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const dragStartPosRef = useRef({ x: 0, y: 0 });
+  const recordingPanelRef = useRef<HTMLDivElement>(null);
+  const DRAG_THRESHOLD = 5; // Minimum pixels to move before starting drag
 
   // Keep ref updated with current transcripts
   useEffect(() => {
@@ -201,6 +209,59 @@ export default function Home() {
   useEffect(() => {
     console.log(`🎨 showSummary state changed: ${showSummary}, isRecording: ${recordingState.isRecording}, transcripts: ${transcripts.length}`);
   }, [showSummary, recordingState.isRecording, transcripts.length]);
+
+  // Draggable recording panel handlers (for split view mode only)
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    // Prevent drag if clicking on a button or interactive element
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input') || target.closest('textarea')) {
+      return;
+    }
+    
+    if (!recordingPanelRef.current) return;
+    const rect = recordingPanelRef.current.getBoundingClientRect();
+    dragOffsetRef.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+    dragStartPosRef.current = {
+      x: e.clientX,
+      y: e.clientY
+    };
+    setIsDragging(true);
+  }, []);
+
+  const handleDrag = useCallback((e: MouseEvent) => {
+    if (!isDragging || !recordingPanelRef.current) return;
+    
+    // Check if mouse has moved enough to start dragging
+    const deltaX = Math.abs(e.clientX - dragStartPosRef.current.x);
+    const deltaY = Math.abs(e.clientY - dragStartPosRef.current.y);
+    if (deltaX < DRAG_THRESHOLD && deltaY < DRAG_THRESHOLD) {
+      return;
+    }
+    
+    setRecordingPanelPosition({
+      x: e.clientX - dragOffsetRef.current.x,
+      y: e.clientY - dragOffsetRef.current.y
+    });
+  }, [isDragging]);
+
+  const handleDragEnd = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  // Listen to mouse move and mouse up events for dragging
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('mousemove', handleDrag);
+      window.addEventListener('mouseup', handleDragEnd);
+      return () => {
+        window.removeEventListener('mousemove', handleDrag);
+        window.removeEventListener('mouseup', handleDragEnd);
+      };
+    }
+  }, [isDragging, handleDrag, handleDragEnd]);
 
   const modelOptions: Record<ModelConfig['provider'], string[]> = {
     ollama: models.map(model => model.name),
@@ -2015,9 +2076,20 @@ export default function Home() {
               isModelConfigLoading={false}
             />
 
-            {/* Recording control buttons - fixed at bottom */}
+            {/* Recording control buttons - draggable in split view mode */}
             {((hasMicrophone || hasSystemAudio) || recordingState.isRecording) && !isProcessingStop && !isSavingTranscript && (
-              <div className="fixed bottom-36 left-0 right-0 z-10">
+              <div 
+                ref={recordingPanelRef}
+                className="fixed z-10 cursor-move select-none"
+                style={{
+                  bottom: recordingPanelPosition ? undefined : '9rem',
+                  left: recordingPanelPosition ? recordingPanelPosition.x : '50%',
+                  top: recordingPanelPosition ? recordingPanelPosition.y : undefined,
+                  right: recordingPanelPosition ? undefined : undefined,
+                  transform: recordingPanelPosition ? undefined : 'translateX(-50%)',
+                }}
+                onMouseDown={handleDragStart}
+              >
                 <div className="flex justify-center pl-8 transition-[margin] duration-300"
                      style={{ marginLeft: sidebarCollapsed ? '2rem' : '8rem' }}>
                   <div className="w-1/2 flex justify-center">
