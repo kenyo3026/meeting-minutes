@@ -10,6 +10,7 @@ use crate::{
         repositories::{
             meeting::MeetingsRepository, setting::SettingsRepository,
             transcript::TranscriptsRepository,
+            transcript_chunk::TranscriptChunksRepository,
         },
     },
     state::AppState,
@@ -892,6 +893,204 @@ pub async fn api_save_transcript<R: Runtime>(
             Err(format!("Failed to save transcript: {}", e))
         }
     }
+}
+
+/// Creates a new meeting record in the database and returns its ID
+/// This is called at the start of recording to establish a stable meeting_id
+#[tauri::command]
+pub async fn api_create_meeting<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    title: String,
+) -> Result<String, String> {
+    log_info!("api_create_meeting called for title: {}", title);
+
+    let pool = state.db_manager.pool();
+    let meeting_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now();
+
+    sqlx::query(
+        "INSERT INTO meetings (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)"
+    )
+    .bind(&meeting_id)
+    .bind(&title)
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        log_error!("Failed to create meeting: {}", e);
+        format!("Failed to create meeting: {}", e)
+    })?;
+
+    log_info!("✅ Created meeting with ID: {}", meeting_id);
+    Ok(meeting_id)
+}
+
+/// Updates an existing meeting with folder_path
+/// This is called when recording stops
+/// NOTE: Transcripts are now saved in real-time during recording via api_save_single_transcript
+#[tauri::command]
+pub async fn api_update_meeting_transcripts<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    transcripts: Vec<serde_json::Value>,
+    folder_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    log_info!(
+        "api_update_meeting_transcripts called for meeting_id: {}, folder_path: {:?}",
+        meeting_id,
+        folder_path
+    );
+
+    log_info!(
+        "⏩ Skipping transcript save (already saved in real-time), transcripts count: {}",
+        transcripts.len()
+    );
+
+    let pool = state.db_manager.pool();
+    let now = chrono::Utc::now();
+
+    // Update meeting's folder_path and updated_at
+    if let Some(path) = &folder_path {
+        sqlx::query("UPDATE meetings SET folder_path = ?, updated_at = ? WHERE id = ?")
+            .bind(path)
+            .bind(now)
+            .bind(&meeting_id)
+            .execute(pool)
+            .await
+            .map_err(|e| {
+                log_error!("Failed to update meeting folder_path: {}", e);
+                format!("Failed to update meeting folder_path: {}", e)
+            })?;
+        log_info!("✅ Updated meeting folder_path: {}", path);
+    } else {
+        // Just update the updated_at timestamp
+        sqlx::query("UPDATE meetings SET updated_at = ? WHERE id = ?")
+            .bind(now)
+            .bind(&meeting_id)
+            .execute(pool)
+            .await
+            .map_err(|e| {
+                log_error!("Failed to update meeting timestamp: {}", e);
+                format!("Failed to update meeting timestamp: {}", e)
+            })?;
+    }
+
+    // Verify transcripts were saved during recording
+    let transcript_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM transcripts WHERE meeting_id = ?"
+    )
+    .bind(&meeting_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        log_error!("Failed to count transcripts: {}", e);
+        format!("Failed to verify transcripts: {}", e)
+    })?;
+
+    log_info!(
+        "✅ Meeting {} updated, verified {} transcripts in database",
+        meeting_id,
+        transcript_count.0
+    );
+
+    Ok(serde_json::json!({
+        "status": "success",
+        "message": "Meeting updated successfully",
+        "meeting_id": meeting_id,
+        "transcript_count": transcript_count.0
+    }))
+}
+
+/// Saves a single transcript segment to the database immediately
+/// This is called during recording for each new transcript
+#[tauri::command]
+pub async fn api_save_single_transcript<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    transcript: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    log_info!(
+        "api_save_single_transcript called for meeting_id: {}",
+        meeting_id
+    );
+
+    // Convert serde_json::Value to TranscriptSegment
+    let segment: TranscriptSegment = serde_json::from_value(transcript)
+        .map_err(|e| {
+            log_error!("Failed to parse transcript segment: {}", e);
+            format!("Invalid transcript data format: {}", e)
+        })?;
+
+    let pool = state.db_manager.pool();
+
+    // Generate transcript_id using sequence_id or timestamp
+    let transcript_id = format!("{}-{}", meeting_id, segment.id);
+
+    // Use INSERT OR REPLACE to handle potential duplicates
+    sqlx::query(
+        r#"
+        INSERT OR REPLACE INTO transcripts
+        (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        "#
+    )
+    .bind(&transcript_id)
+    .bind(&meeting_id)
+    .bind(&segment.text)
+    .bind(&segment.timestamp)
+    .bind(segment.audio_start_time)
+    .bind(segment.audio_end_time)
+    .bind(segment.duration)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        log_error!("Failed to insert transcript segment: {}", e);
+        format!("Failed to insert transcript: {}", e)
+    })?;
+
+    log_info!(
+        "✅ Saved transcript segment {} to meeting {}",
+        transcript_id,
+        meeting_id
+    );
+
+    // Update transcript_chunks with latest transcripts
+    // Retrieve all transcripts for this meeting and join as complete text
+    let all_transcripts: Vec<crate::database::models::Transcript> = sqlx::query_as(
+        r#"
+        SELECT * FROM transcripts 
+        WHERE meeting_id = ? 
+        ORDER BY COALESCE(audio_start_time, 0) ASC, id ASC
+        "#
+    )
+    .bind(&meeting_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    if !all_transcripts.is_empty() {
+        let full_transcript_text = all_transcripts
+            .iter()
+            .map(|t| t.transcript.as_str())
+            .collect::<Vec<&str>>()
+            .join("\n");
+
+        // Update transcript_chunks (will create if not exists, update if exists)
+        if let Err(e) = TranscriptChunksRepository::update_transcript_text_only(pool, &meeting_id, &full_transcript_text).await {
+            // Log error but don't fail the transcript save operation
+            log_error!("Failed to update transcript_chunks for meeting {}: {}", meeting_id, e);
+        }
+    }
+
+    Ok(serde_json::json!({
+        "status": "success",
+        "message": "Transcript saved successfully",
+        "transcript_id": transcript_id
+    }))
 }
 
 /// Opens the meeting's recording folder in the system file explorer

@@ -31,14 +31,12 @@ import { Copy, GlobeIcon, Settings } from 'lucide-react';
 import { MicrophoneIcon } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import { ButtonGroup } from '@/components/ui/button-group';
+import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
+import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { ModelConfig } from '@/components/ModelSettingsModal';
+import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 
 
-
-interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openrouter';
-  model: string;
-  whisperModel: string;
-}
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -149,6 +147,14 @@ export default function Home() {
     }
     return true;
   });
+  const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
+  const blockNoteSummaryRef = useRef<any>(null);
+
+  // Auto Summary feature status
+  const [autoSummaryInterval, setAutoSummaryInterval] = useState<NodeJS.Timeout | null>(null);
+  const AUTO_SUMMARY_MINUTES = 5; // Every N minute auto-generate summary (configurable)
+  // Use ref to avoid closure issues, allowing listeners to get the latest meeting ID
+  const currentMeetingIdRef = useRef<string | null>(null);
 
   // Permission check hook
   const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions, checkPermissions } = usePermissionCheck();
@@ -164,21 +170,46 @@ export default function Home() {
   const handleNavigation = useNavigation('', ''); // Initialize with empty values
   const router = useRouter();
 
+  // Template management hook for summary generation
+  const templates = useTemplates();
+
   // Ref for final buffer flush functionality
   const finalFlushRef = useRef<(() => void) | null>(null);
 
   // Ref to avoid stale closure issues with transcripts
   const transcriptsRef = useRef<Transcript[]>(transcripts);
 
+  // Ref for generateAISummary to avoid closure issues in auto summary
+  const generateAISummaryRef = useRef<((prompt: string) => Promise<void>) | null>(null);
+
+  // Ref for summaryStatus and customPrompt to avoid closure issues
+  const summaryStatusRef = useRef<SummaryStatus>(summaryStatus);
+  const customPromptRef = useRef<string>(customPrompt);
+  const isRecordingRef = useRef<boolean>(recordingState.isRecording);
+
   const isUserAtBottomRef = useRef<boolean>(true);
 
   // Ref for the transcript scrollable container
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
 
+  // Draggable recording panel state (for split view mode only)
+  const [recordingPanelPosition, setRecordingPanelPosition] = useState<{ x: number; y: number } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const dragStartPosRef = useRef({ x: 0, y: 0 });
+  const recordingPanelRef = useRef<HTMLDivElement>(null);
+  const DRAG_THRESHOLD = 5; // Minimum pixels to move before starting drag
+
   // Keep ref updated with current transcripts
   useEffect(() => {
     transcriptsRef.current = transcripts;
   }, [transcripts]);
+
+    // Sync currentMeetingId to ref to avoid closure issues
+  useEffect(() => {
+    currentMeetingIdRef.current = currentMeetingId;
+    console.log('📍 currentMeetingIdRef updated:', currentMeetingId);
+  }, [currentMeetingId]);
 
   // Smart auto-scroll: Track user scroll position
   useEffect(() => {
@@ -218,11 +249,71 @@ export default function Home() {
     }
   }, [transcripts]);
 
-  const modelOptions = {
+  // Keep the summary visible after recording ends, until the user navigates away or reloads the page
+  useEffect(() => {
+    console.log(`🎨 showSummary state changed: ${showSummary}, isRecording: ${recordingState.isRecording}, transcripts: ${transcripts.length}`);
+  }, [showSummary, recordingState.isRecording, transcripts.length]);
+
+  // Draggable recording panel handlers (for split view mode only)
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    // Prevent drag if clicking on a button or interactive element
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input') || target.closest('textarea')) {
+      return;
+    }
+    
+    if (!recordingPanelRef.current) return;
+    const rect = recordingPanelRef.current.getBoundingClientRect();
+    dragOffsetRef.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+    dragStartPosRef.current = {
+      x: e.clientX,
+      y: e.clientY
+    };
+    setIsDragging(true);
+  }, []);
+
+  const handleDrag = useCallback((e: MouseEvent) => {
+    if (!isDragging || !recordingPanelRef.current) return;
+    
+    // Check if mouse has moved enough to start dragging
+    const deltaX = Math.abs(e.clientX - dragStartPosRef.current.x);
+    const deltaY = Math.abs(e.clientY - dragStartPosRef.current.y);
+    if (deltaX < DRAG_THRESHOLD && deltaY < DRAG_THRESHOLD) {
+      return;
+    }
+    
+    setRecordingPanelPosition({
+      x: e.clientX - dragOffsetRef.current.x,
+      y: e.clientY - dragOffsetRef.current.y
+    });
+  }, [isDragging]);
+
+  const handleDragEnd = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  // Listen to mouse move and mouse up events for dragging
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('mousemove', handleDrag);
+      window.addEventListener('mouseup', handleDragEnd);
+      return () => {
+        window.removeEventListener('mousemove', handleDrag);
+        window.removeEventListener('mouseup', handleDragEnd);
+      };
+    }
+  }, [isDragging, handleDrag, handleDragEnd]);
+
+  const modelOptions: Record<ModelConfig['provider'], string[]> = {
     ollama: models.map(model => model.name),
     claude: ['claude-3-5-sonnet-latest'],
     groq: ['llama-3.3-70b-versatile'],
+    openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     openrouter: [],
+    'openai-compatible': [],
   };
 
   useEffect(() => {
@@ -443,6 +534,37 @@ export default function Home() {
           }
 
           console.log(`Adding ${uniqueNewTranscripts.length} unique transcripts out of ${allNewTranscripts.length} received`);
+
+          // Save each new transcript to the database immediately
+          // Use Promise.all to ensure all save operations are executed correctly
+          // Use ref to avoid closure issues
+          const meetingIdForSave = currentMeetingIdRef.current;
+          if (uniqueNewTranscripts.length > 0 && meetingIdForSave) {
+            console.log(`📝 Starting batch save for ${uniqueNewTranscripts.length} transcripts to meeting ${meetingIdForSave}`);
+            Promise.all(
+              uniqueNewTranscripts.map(async (transcript) => {
+                try {
+                  await invoke('api_save_single_transcript', {
+                    meetingId: meetingIdForSave,
+                    transcript: transcript,
+                  });
+                  console.log(`💾 Saved transcript ${transcript.sequence_id} (${transcript.text.substring(0, 30)}...) to database`);
+                  return { success: true, sequenceId: transcript.sequence_id };
+                } catch (error) {
+                  console.error(`❌ Failed to save transcript ${transcript.sequence_id}:`, error);
+                  return { success: false, sequenceId: transcript.sequence_id, error };
+                }
+              })
+            ).then(results => {
+              const successCount = results.filter(r => r.success).length;
+              const failCount = results.filter(r => !r.success).length;
+              console.log(`✅ Batch save completed: ${successCount} success, ${failCount} failed`);
+            }).catch(err => {
+              console.error('❌ Unexpected error in batch save:', err);
+            });
+          } else if (!meetingIdForSave) {
+            console.warn('⚠️ Skipping transcript save: currentMeetingId is null');
+          }
 
           // Merge with existing transcripts, maintaining chronological order
           const combined = [...prev, ...uniqueNewTranscripts];
@@ -740,7 +862,7 @@ export default function Home() {
 
   const handleRecordingStart = async () => {
     try {
-      console.log('handleRecordingStart called - setting up meeting title and state');
+      console.log('🎙️ handleRecordingStart called - setting up meeting title and state');
 
       const now = new Date();
       const day = String(now.getDate()).padStart(2, '0');
@@ -752,15 +874,28 @@ export default function Home() {
       const randomTitle = `Meeting ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
       setMeetingTitle(randomTitle);
 
+      // Create meeting record to get a stable ID
+      console.log('📝 Creating meeting record in database...');
+      const meetingId = await invoke('api_create_meeting', {
+        title: randomTitle,
+      }) as string;
+      setCurrentMeetingId(meetingId);
+      currentMeetingIdRef.current = meetingId;
+      console.log('✅ Meeting created with ID:', meetingId);
+
       // Update state - the actual recording is already started by RecordingControls
-      console.log('Setting isRecordingState to true');
+      console.log('🔄 Setting recording states...');
       setIsRecordingState(true); // This will also update the sidebar via the useEffect
       setTranscripts([]); // Clear previous transcripts when starting new recording
       setIsMeetingActive(true);
+      setShowSummary(true); // Immediately show the summary panel
+      console.log('✅ Recording started - showSummary: true, meetingId:', meetingId);
       Analytics.trackButtonClick('start_recording', 'home_page');
 
       // Show recording notification if enabled
       await showRecordingNotification();
+
+      startAutoSummary();
     } catch (error) {
       console.error('Failed to start recording:', error);
       alert('Failed to start recording. Check console for details.');
@@ -800,6 +935,15 @@ export default function Home() {
             // Defensive check: Ensure recordingMode always has a value
             const finalRecordingMode = recordingMode || DEFAULT_RECORDING_MODE;
 
+            // Create meeting record to get a stable ID (same as handleRecordingStart)
+            console.log('📝 Creating meeting record in database for auto-start...');
+            const meetingId = await invoke('api_create_meeting', {
+              title: generatedMeetingTitle,
+            }) as string;
+            setCurrentMeetingId(meetingId);
+            currentMeetingIdRef.current = meetingId;
+            console.log('✅ Meeting created with ID:', meetingId);
+
             await invoke('start_recording_with_devices_and_meeting', {
               micDeviceName: micDeviceName,       // Maps to Rust mic_device_name
               systemDeviceName: systemDeviceName, // Maps to Rust system_device_name
@@ -812,7 +956,12 @@ export default function Home() {
             setIsRecordingState(true);
             setTranscripts([]);
             setIsMeetingActive(true);
+            setShowSummary(true); // Immediately show the summary panel
+            console.log('✅ Auto-start recording started - showSummary: true, meetingId:', meetingId);
             Analytics.trackButtonClick('start_recording', 'sidebar_auto');
+            
+            // Start auto summary
+            startAutoSummary();
 
             // Show recording notification if enabled
             await showRecordingNotification();
@@ -1027,18 +1176,21 @@ export default function Home() {
         });
 
         try {
-          const responseData = await invoke('api_save_transcript', {
-            meetingTitle: meetingTitle || savedMeetingName,
-            transcripts: freshTranscripts, 
-            folderPath: folderPath, 
-          }) as any;
+          const meetingIdForStop = currentMeetingIdRef.current;
+          console.log('📍 Using meeting ID for stop:', meetingIdForStop);
 
-          const meetingId = responseData.meeting_id;
-          if (!meetingId) {
-            console.error('No meeting_id in response:', responseData);
-            throw new Error('No meeting ID received from save operation');
+          if (!meetingIdForStop) {
+            console.error('❌ No meeting ID available for saving transcripts');
+            throw new Error('No meeting ID available');
           }
 
+          const responseData = await invoke('api_update_meeting_transcripts', {
+            meetingId: meetingIdForStop,
+            transcripts: freshTranscripts,
+            folderPath: folderPath,
+          }) as any;
+
+          const meetingId = meetingIdForStop;
           console.log('✅ Successfully saved COMPLETE meeting with ID:', meetingId);
           console.log('   Transcripts:', freshTranscripts.length);
           console.log('   folder_path:', folderPath);
@@ -1164,6 +1316,8 @@ export default function Home() {
       setIsSavingTranscript(false);
       setIsRecordingDisabled(false);
     }
+
+    stopAutoSummary();
   };
 
   const handleTranscriptUpdate = (update: any) => {
@@ -1209,29 +1363,43 @@ export default function Home() {
   };
 
   const generateAISummary = useCallback(async (prompt: string = '') => {
+    console.log('🤖 generateAISummary called');
     setSummaryStatus('processing');
     setSummaryError(null);
 
     try {
-      const fullTranscript = transcripts.map(t => t.text).join('\n');
+      const currentTranscripts = transcriptsRef.current;
+      console.log(`📊 Current transcripts from ref: ${currentTranscripts?.length || 0} items`);
+
+      if (!currentTranscripts || currentTranscripts.length === 0) {
+        console.error('❌ No transcripts available for summary generation');
+        throw new Error('No transcripts available for summary generation.');
+      }
+
+      const fullTranscript = currentTranscripts.map(t => t.text).join('\n');
       if (!fullTranscript.trim()) {
+        console.error('❌ Transcript text is empty');
         throw new Error('No transcript text available. Please add some text first.');
       }
 
       // Store the original transcript for regeneration
       setOriginalTranscript(fullTranscript);
 
-      console.log('Generating summary for transcript length:', fullTranscript.length);
+      console.log(`✅ Generating summary for transcript length: ${fullTranscript.length} chars, ${currentTranscripts.length} segments`);
 
       // Process transcript and get process_id
       console.log('Processing transcript...');
+      const meetingIdForSummary = currentMeetingIdRef.current;
+      console.log('📍 Using meeting ID for summary:', meetingIdForSummary);
       const result = await invoke('api_process_transcript', {
         text: fullTranscript,
         model: modelConfig.provider,
         modelName: modelConfig.model,
+        meetingId: meetingIdForSummary,
         chunkSize: 40000,
         overlap: 1000,
         customPrompt: prompt,
+        templateId: templates.selectedTemplate,
       }) as any;
 
       const process_id = result.process_id;
@@ -1246,8 +1414,9 @@ export default function Home() {
           }) as any;
           console.log('Summary status:', result);
 
-          if (result.status === 'error') {
-            setSummaryError(result.error || 'Unknown error');
+          // Check for both 'error' and 'failed' status
+          if (result.status === 'error' || result.status === 'failed') {
+            setSummaryError(result.error || 'Summary generation failed');
             setSummaryStatus('error');
             clearInterval(pollInterval);
             return;
@@ -1256,30 +1425,75 @@ export default function Home() {
           if (result.status === 'completed' && result.data) {
             clearInterval(pollInterval);
 
-            // Remove MeetingName from data before formatting
-            const { MeetingName, ...summaryData } = result.data;
-
-            // Update meeting title if available
-            if (MeetingName) {
-              setMeetingTitle(MeetingName);
+            // Handle different formats of summary data
+            // 1. If it's a markdown string (backend new version)
+            if (typeof result.data === 'string') {
+              // Directly use markdown format
+              setAiSummary({ markdown: result.data } as any);
+              setSummaryStatus('completed');
             }
+            // 2. If it's a structured object (may contain markdown or legacy JSON)
+            else if (typeof result.data === 'object') {
+              // Check if there is a MeetingName property to handle
+              const { MeetingName, ...summaryData } = result.data;
 
-            // Format the summary data with consistent styling
-            const formattedSummary = Object.entries(summaryData).reduce((acc: Summary, [key, section]: [string, any]) => {
-              acc[key] = {
-                title: section.title,
-                blocks: section.blocks.map((block: any) => ({
-                  ...block,
-                  // type: 'bullet',
-                  color: 'default',
-                  content: block.content.trim() // Remove trailing newlines
-                }))
-              };
-              return acc;
-            }, {} as Summary);
+              // Update meeting title if available
+              if (MeetingName) {
+                setMeetingTitle(MeetingName);
+              }
 
-            setAiSummary(formattedSummary);
-            setSummaryStatus('completed');
+              // If there is a markdown field, use it with priority
+              // Include all data fields including ttft_us and total_time_us (same as meeting-details)
+              if (summaryData.markdown) {
+                console.log('📝 Received markdown format from backend');
+                setAiSummary(summaryData as any);
+              }
+              // If there is a summary_json field (BlockNote format)
+              // Include all data fields including ttft_us and total_time_us
+              else if (summaryData.summary_json) {
+                setAiSummary(summaryData as any);
+              }
+              // Otherwise, assume it is legacy JSON format
+              else {
+                try {
+                  // Format the legacy summary data with consistent styling
+                  const formattedSummary = Object.entries(summaryData).reduce((acc: Summary, [key, section]: [string, any]) => {
+                    if (section && typeof section === 'object' && section.title && section.blocks) {
+                      acc[key] = {
+                        title: section.title,
+                        blocks: section.blocks.map((block: any) => ({
+                          ...block,
+                          color: 'default',
+                          content: block.content.trim() // Remove trailing newlines
+                        }))
+                      };
+                    }
+                    return acc;
+                  }, {} as Summary);
+
+                  // Preserve timing metrics in legacy format (if they exist in summaryData)
+                  if (summaryData.ttft_us !== undefined) {
+                    (formattedSummary as any).ttft_us = summaryData.ttft_us;
+                  }
+                  if (summaryData.total_time_us !== undefined) {
+                    (formattedSummary as any).total_time_us = summaryData.total_time_us;
+                  }
+
+                  setAiSummary(formattedSummary);
+                } catch (error) {
+                  console.error('Failed to parse legacy summary format:', error);
+                  setSummaryError('Failed to parse summary data');
+                  setSummaryStatus('error');
+                  return;
+                }
+              }
+              setSummaryStatus('completed');
+            } else {
+              console.error('Unexpected summary data format:', result.data);
+              setSummaryError('Unexpected summary data format');
+              setSummaryStatus('error');
+              return;
+            }
           }
         } catch (error) {
           console.error('Failed to get summary status:', error);
@@ -1293,8 +1507,8 @@ export default function Home() {
         }
       }, 3000); // Poll every 3 seconds
 
-      // Cleanup interval on component unmount
-      return () => clearInterval(pollInterval);
+      // Note: The interval will be cleared by the polling logic when complete/error
+      // No need to return a cleanup function here as it conflicts with the return type
 
     } catch (error) {
       console.error('Failed to generate summary:', error);
@@ -1305,7 +1519,70 @@ export default function Home() {
       }
       setSummaryStatus('error');
     }
-  }, [transcripts, modelConfig]);
+  }, [transcripts, modelConfig, templates.selectedTemplate]);
+
+  useEffect(() => {
+    generateAISummaryRef.current = generateAISummary;
+  }, [generateAISummary]);
+
+  useEffect(() => {
+    summaryStatusRef.current = summaryStatus;
+  }, [summaryStatus]);
+
+  useEffect(() => {
+    customPromptRef.current = customPrompt;
+  }, [customPrompt]);
+
+  useEffect(() => {
+    isRecordingRef.current = recordingState.isRecording;
+  }, [recordingState.isRecording]);
+
+  const startAutoSummary = useCallback(() => {
+    console.log(`🚀 Starting auto summary every ${AUTO_SUMMARY_MINUTES} minutes`);
+
+    // Clear existing timer
+    if (autoSummaryInterval) {
+      clearInterval(autoSummaryInterval);
+    }
+
+    // Set new timer
+    const interval = setInterval(async () => {
+      try {
+        // Check if recording is active and there are transcripts
+        if (isRecordingRef.current && transcriptsRef.current.length > 0) {
+          // Allow auto summary in idle, completed, or error states
+          // Only skip when actively processing (processing, summarizing, regenerating)
+          const status = summaryStatusRef.current;
+          if (status === 'idle' || status === 'completed' || status === 'error') {
+            console.log('🤖 Auto-generating summary...');
+            // Show notification to user
+            toast.info(`Auto-generating meeting summary...`, {
+              description: `Next auto summary in ${AUTO_SUMMARY_MINUTES} minutes`
+            });
+            if (generateAISummaryRef.current) {
+              await generateAISummaryRef.current(customPromptRef.current);
+            }
+          } else {
+            console.log('⏳ Auto summary skipped - already processing (status:', status, ')');
+          }
+        } else {
+          console.log('⏸️ Auto summary skipped - not recording or no transcripts');
+        }
+      } catch (error) {
+        console.error('❌ Auto summary failed:', error);
+      }
+    }, AUTO_SUMMARY_MINUTES * 60 * 1000);
+
+    setAutoSummaryInterval(interval);
+  }, [autoSummaryInterval, AUTO_SUMMARY_MINUTES]);
+
+  const stopAutoSummary = useCallback(() => {
+    console.log('🛑 Stopping auto summary');
+    if (autoSummaryInterval) {
+      clearInterval(autoSummaryInterval);
+      setAutoSummaryInterval(null);
+    }
+  }, [autoSummaryInterval]);
 
   const handleSummary = useCallback((summary: any) => {
     setAiSummary(summary);
@@ -1476,7 +1753,8 @@ export default function Home() {
         }
       }, 1000);
 
-      return () => clearInterval(pollInterval);
+      // Note: The interval will be cleared by the polling logic when complete/error
+      // No need to return a cleanup function here as it conflicts with the return type
     } catch (error) {
       console.error('Failed to regenerate summary:', error);
       if (error instanceof Error) {
@@ -1524,6 +1802,60 @@ export default function Home() {
       }
     }
   }, [transcripts, generateAISummary]);
+
+  // Copy Summary content
+  const handleCopySummary = useCallback(async () => {
+    if (!aiSummary) {
+      toast.error('No summary available to copy');
+      return;
+    }
+
+    try {
+      let textToCopy = '';
+
+      // Handle markdown format (using type assertion)
+      const summaryWithMarkdown = aiSummary as any;
+      if ('markdown' in summaryWithMarkdown && typeof summaryWithMarkdown.markdown === 'string') {
+        textToCopy = summaryWithMarkdown.markdown;
+      } else {
+        // Handle old block format
+        Object.entries(aiSummary).forEach(([key, section]) => {
+          if (section && typeof section === 'object' && 'title' in section) {
+            textToCopy += `\n## ${section.title}\n\n`;
+            if ('blocks' in section && Array.isArray(section.blocks)) {
+              section.blocks.forEach((block: any) => {
+                textToCopy += `- ${block.content}\n`;
+              });
+            }
+          }
+        });
+      }
+
+      await navigator.clipboard.writeText(textToCopy);
+      toast.success('Summary copied to clipboard');
+      Analytics.trackButtonClick('copy_summary', 'home_page');
+    } catch (error) {
+      console.error('Failed to copy summary:', error);
+      toast.error('Failed to copy summary');
+    }
+  }, [aiSummary]);
+
+  // Handle model configuration save
+  const handleSaveModelConfig = useCallback(async (config?: ModelConfig) => {
+    try {
+      const configToSave = config || modelConfig;
+      await invoke('api_save_model_config', {
+        provider: configToSave.provider,
+        model: configToSave.model,
+        whisperModel: configToSave.whisperModel,
+      });
+      toast.success('Model configuration saved');
+      Analytics.trackButtonClick('save_model_config', 'home_page');
+    } catch (error) {
+      console.error('Failed to save model config:', error);
+      toast.error('Failed to save model configuration');
+    }
+  }, [modelConfig]);
 
   // Handle transcript configuration save
   const handleSaveTranscriptConfig = async (config: TranscriptModelProps) => {
@@ -1591,13 +1923,24 @@ export default function Home() {
 
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
-  const isProcessingStop = summaryStatus === 'processing' || isProcessingTranscript
+  // Only hide recording controls when actually stopping the recording, NOT when generating summary
+  const isProcessingStop = isProcessingTranscript;
   const handleRecordingStop2Ref = useRef(handleRecordingStop2);
   const handleRecordingStartRef = useRef(handleRecordingStart);
   useEffect(() => {
     handleRecordingStop2Ref.current = handleRecordingStop2;
     handleRecordingStartRef.current = handleRecordingStart;
   });
+
+  // Clean up auto summary timer when component unmounts
+  useEffect(() => {
+    return () => {
+      console.log('🧹 Component unmounting - cleaning up auto summary timer');
+      if (autoSummaryInterval) {
+        clearInterval(autoSummaryInterval);
+      }
+    };
+  }, [autoSummaryInterval]);
 
   // Expose handleRecordingStop and handleRecordingStart functions to rust using refs for stale closure issues
   useEffect(() => {
@@ -1621,7 +1964,10 @@ export default function Home() {
             ...prev,
             provider: data.provider,
             model: data.model || prev.model,
-            whisperModel: data.whisperModel || prev.whisperModel,
+            whisperModel: data.whisperModel || data.whisper_model || prev.whisperModel,
+            apiKey: data.apiKey || data.api_key || prev.apiKey,
+            ollamaEndpoint: data.ollamaEndpoint || data.ollama_endpoint || prev.ollamaEndpoint,
+            openaiCompatibleEndpoint: data.openaiCompatibleEndpoint || data.openai_compatible_endpoint || prev.openaiCompatibleEndpoint,
           }));
         }
       } catch (error) {
@@ -1708,8 +2054,122 @@ export default function Home() {
         </div>
       )}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left side - Transcript */}
-        <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
+        {/* Conditionally render: show dual panels when recording or there is summary */}
+        {/* Only show if currentMeetingId is set (meeting record created) */}
+        {showSummary && (recordingState.isRecording || transcripts.length > 0) && currentMeetingId ? (
+          <>
+            {/* Left: Transcript panel */}
+            <TranscriptPanel
+              transcripts={transcripts}
+              customPrompt={customPrompt}
+              onPromptChange={setCustomPrompt}
+              onCopyTranscript={handleCopyTranscript}
+              onOpenMeetingFolder={async () => {
+                if (!currentMeetingId) return;
+                try {
+                  await invoke('open_meeting_folder', {
+                    meetingId: currentMeetingId
+                  });
+                } catch (error) {
+                  console.error('Failed to open folder:', error);
+                  toast.error('Failed to open meeting folder');
+                }
+              }}
+              isRecording={false}
+            />
+
+            {/* Right: Summary panel */}
+            <SummaryPanel
+              meeting={{
+                id: currentMeetingId,
+                title: meetingTitle,
+                created_at: new Date().toISOString()
+              }}
+              meetingTitle={meetingTitle}
+              onTitleChange={handleTitleChange}
+              isEditingTitle={isEditingTitle}
+              onStartEditTitle={() => setIsEditingTitle(true)}
+              onFinishEditTitle={() => setIsEditingTitle(false)}
+              isTitleDirty={false}
+              summaryRef={blockNoteSummaryRef}
+              isSaving={false}
+              onSaveAll={async () => {}}
+              onCopySummary={handleCopySummary}
+              onOpenFolder={async () => {
+                if (!currentMeetingId) return;
+                try {
+                  await invoke('open_meeting_folder', {
+                    meetingId: currentMeetingId
+                  });
+                } catch (error) {
+                  console.error('Failed to open folder:', error);
+                  toast.error('Failed to open meeting folder');
+                }
+              }}
+              aiSummary={aiSummary}
+              summaryStatus={summaryStatus}
+              transcripts={transcripts}
+              modelConfig={modelConfig}
+              setModelConfig={setModelConfig}
+              onSaveModelConfig={handleSaveModelConfig}
+              onGenerateSummary={handleGenerateSummary}
+              customPrompt={customPrompt}
+              summaryResponse={summaryResponse}
+              onSaveSummary={async () => {}}
+              onSummaryChange={handleSummaryChange}
+              onDirtyChange={() => {}}
+              summaryError={summaryError}
+              onRegenerateSummary={handleRegenerateSummary}
+              getSummaryStatusMessage={getSummaryStatusMessage}
+              availableTemplates={templates.availableTemplates}
+              selectedTemplate={templates.selectedTemplate}
+              onTemplateSelect={templates.handleTemplateSelection}
+              isModelConfigLoading={false}
+            />
+
+            {/* Recording control buttons - draggable in split view mode */}
+            {((hasMicrophone || hasSystemAudio) || recordingState.isRecording) && !isProcessingStop && !isSavingTranscript && (
+              <div 
+                ref={recordingPanelRef}
+                className="fixed z-10 cursor-move select-none"
+                style={{
+                  bottom: recordingPanelPosition ? undefined : '9rem',
+                  left: recordingPanelPosition ? recordingPanelPosition.x : '50%',
+                  top: recordingPanelPosition ? recordingPanelPosition.y : undefined,
+                  right: recordingPanelPosition ? undefined : undefined,
+                  transform: recordingPanelPosition ? undefined : 'translateX(-50%)',
+                }}
+                onMouseDown={handleDragStart}
+              >
+                <div className="flex justify-center pl-8 transition-[margin] duration-300"
+                     style={{ marginLeft: sidebarCollapsed ? '2rem' : '8rem' }}>
+                  <div className="w-1/2 flex justify-center">
+                    <div className="bg-white rounded-full shadow-lg flex items-center">
+                      <RecordingControls
+                        isRecording={recordingState.isRecording}
+                        onRecordingStop={(callApi = true) => handleRecordingStop2(callApi)}
+                        onRecordingStart={handleRecordingStart}
+                        onTranscriptReceived={handleTranscriptUpdate}
+                        onStopInitiated={() => setIsStopping(true)}
+                        barHeights={barHeights}
+                        onTranscriptionError={(message) => {
+                          setErrorMessage(message);
+                          setShowErrorAlert(true);
+                        }}
+                        isRecordingDisabled={isRecordingDisabled}
+                        isParentProcessing={isProcessingStop}
+                        selectedDevices={selectedDevices}
+                        meetingName={meetingTitle}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          /* Existing single panel display (before recording) */
+          <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
           {/* Title area - Sticky header */}
           <div className="sticky top-0 z-10 bg-white p-4 border-gray-200">
             <div className="flex flex-col space-y-3">
@@ -1913,7 +2373,7 @@ export default function Home() {
           )} */}
 
           {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
-          {(hasMicrophone || isRecording) && !isProcessingStop && !isSavingTranscript && (
+          {((hasMicrophone || hasSystemAudio) || recordingState.isRecording) && !isProcessingStop && !isSavingTranscript && (
             <div className="fixed bottom-12 left-0 right-0 z-10">
               <div
                 className="flex justify-center pl-8 transition-[margin] duration-300"
@@ -2243,6 +2703,7 @@ export default function Home() {
             </div>
           )}
         </div>
+        )}
 
         {/* Right side - AI Summary */}
         {/* <div className="flex-1 overflow-y-auto bg-white"> */}

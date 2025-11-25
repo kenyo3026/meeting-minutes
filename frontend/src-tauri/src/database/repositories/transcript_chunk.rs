@@ -68,4 +68,42 @@ impl TranscriptChunksRepository {
 
         Ok(result.flatten())
     }
+
+    /// Updates only the transcript_text field, preserving other configuration.
+    /// Creates the record if it doesn't exist (with default values for other fields).
+    ///
+    /// # Arguments
+    /// * `pool` - SQLx connection pool
+    /// * `meeting_id` - Meeting identifier
+    /// * `text` - Full transcript text to update
+    ///
+    /// # Returns
+    /// Result<(), sqlx::Error> - Ok if update/insert succeeded
+    pub async fn update_transcript_text_only(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        text: &str,
+    ) -> Result<(), sqlx::Error> {
+        let now = Utc::now();
+        
+        // Use INSERT OR REPLACE to handle both insert and update cases
+        // If record doesn't exist, create with default values for required fields
+        sqlx::query(
+            r#"
+            INSERT INTO transcript_chunks (meeting_id, transcript_text, model, model_name, created_at)
+            VALUES (?, ?, 'unknown', 'unknown', ?)
+            ON CONFLICT(meeting_id) DO UPDATE SET
+                transcript_text = excluded.transcript_text,
+                created_at = excluded.created_at
+            "#
+        )
+        .bind(meeting_id)
+        .bind(text)
+        .bind(now)
+        .execute(pool)
+        .await?;
+
+        log_info!("✅ Updated transcript_text in transcript_chunks for meeting_id: {}", meeting_id);
+        Ok(())
+    }
 }
