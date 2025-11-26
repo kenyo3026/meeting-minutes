@@ -12,6 +12,7 @@ import Analytics from '@/lib/analytics';
 import { RefObject, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { PerformanceMetrics } from '@/components/PerformanceMetrics';
 
 interface SummaryPanelProps {
   meeting: {
@@ -329,24 +330,15 @@ export function SummaryPanel({
             </div>
           )}
           {/* Timing Metrics Display - positioned above Summary content block */}
-          {aiSummary && !isSummaryLoading && (() => {
-            const ttft = (aiSummary as any)?.ttft_us;
-            const totalTime = (aiSummary as any)?.total_time_us;
-            // Always show timing metrics if summary exists (even if ttft is None)
-            if (totalTime !== undefined) {
-              return (
-                <div className="px-6 pt-6 pb-2 flex items-center justify-end gap-3">
-                  <span className="text-[10px] text-gray-500 opacity-70">
-                    ttft: {ttft !== undefined && ttft !== null ? formatTime(ttft) : 'N/A'}
-                  </span>
-                  <span className="text-[10px] text-gray-500 opacity-70">
-                    total: {formatTime(totalTime)}
-                  </span>
-                </div>
-              );
-            }
-            return null;
-          })()}
+          {aiSummary && !isSummaryLoading && (
+            <div className="px-6 pt-6 pb-3 flex items-center justify-end">
+              <PerformanceMetrics
+                ttft={(aiSummary as any)?.ttft_us}
+                totalTime={(aiSummary as any)?.total_time_us}
+                variant="default"
+              />
+            </div>
+          )}
           <div className="p-6 w-full">
             <BlockNoteSummaryView
               ref={summaryRef}
