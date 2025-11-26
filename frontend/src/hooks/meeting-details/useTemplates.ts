@@ -9,7 +9,7 @@ export function useTemplates() {
     name: string;
     description: string;
   }>>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState<string>('standard_meeting');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('brief_summary');
   const [selectedLanguage, setSelectedLanguage] = useState<string>('en');
 
   // Fetch available templates on mount

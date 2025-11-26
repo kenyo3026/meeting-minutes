@@ -1,0 +1,16 @@
+{
+  "name": "Quick key point summary",
+  "description": "A concise summary template for general case transcript.",
+  "sections": [
+    {
+        "title": "Summary",
+        "instruction": "Provide a verry brief, clear, one-paragraph summary of transcripts, no more that 100 words.",
+        "format": "paragraph"
+    },
+    {
+        "title": "Discussion Highlights",
+        "instruction": "Summarize the main topics of discussion, key arguments, and important insights in short",
+        "format": "paragraph"
+    }
+    ]
+}

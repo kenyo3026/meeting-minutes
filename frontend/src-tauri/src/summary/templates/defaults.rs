@@ -3,6 +3,9 @@
 /// These templates are bundled into the binary and serve as fallbacks
 /// when custom templates are not available.
 
+/// Brief summary template for quick key point summary
+pub const BRIEF_SUMMARY: &str = include_str!("../../../templates/brief_summary.json");
+
 /// Daily standup template for engineering/product teams
 pub const DAILY_STANDUP: &str = include_str!("../../../templates/daily_standup.json");
 
@@ -14,6 +17,7 @@ pub const STANDARD_MEETING: &str = include_str!("../../../templates/standard_mee
 /// Maps template identifiers to their embedded JSON content
 pub fn get_builtin_templates() -> Vec<(&'static str, &'static str)> {
     vec![
+        ("brief_summary", BRIEF_SUMMARY),
         ("daily_standup", DAILY_STANDUP),
         ("standard_meeting", STANDARD_MEETING),
     ]
@@ -22,12 +26,13 @@ pub fn get_builtin_templates() -> Vec<(&'static str, &'static str)> {
 /// Get a built-in template by identifier
 ///
 /// # Arguments
-/// * `id` - Template identifier (e.g., "daily_standup", "standard_meeting")
+/// * `id` - Template identifier (e.g., "brief_summary", "daily_standup", "standard_meeting")
 ///
 /// # Returns
 /// The template JSON content if found, None otherwise
 pub fn get_builtin_template(id: &str) -> Option<&'static str> {
     match id {
+        "brief_summary" => Some(BRIEF_SUMMARY),
         "daily_standup" => Some(DAILY_STANDUP),
         "standard_meeting" => Some(STANDARD_MEETING),
         _ => None,
@@ -36,7 +41,7 @@ pub fn get_builtin_template(id: &str) -> Option<&'static str> {
 
 /// List all built-in template identifiers
 pub fn list_builtin_template_ids() -> Vec<&'static str> {
-    vec!["daily_standup", "standard_meeting"]
+    vec!["brief_summary", "daily_standup", "standard_meeting"]
 }
 
 #[cfg(test)]
@@ -58,6 +63,7 @@ mod tests {
 
     #[test]
     fn test_get_builtin_template() {
+        assert!(get_builtin_template("brief_summary").is_some());
         assert!(get_builtin_template("daily_standup").is_some());
         assert!(get_builtin_template("standard_meeting").is_some());
         assert!(get_builtin_template("nonexistent").is_none());
