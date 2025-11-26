@@ -41,6 +41,7 @@ pub mod audio;
 pub mod chat;
 pub mod console_utils;
 pub mod database;
+pub mod lrc;
 pub mod notifications;
 pub mod ollama;
 pub mod openrouter;
@@ -304,7 +305,7 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
 ) -> Result<(), String> {
     // Manually convert string to RecordingMode enum
     // Tauri's JSON serialization doesn't properly handle enum deserialization with rename_all
-    let recording_mode_enum: Option<audio::recording_commands::RecordingMode> = 
+    let recording_mode_enum: Option<audio::recording_commands::RecordingMode> =
         recording_mode.as_ref().and_then(|mode_str| {
             match mode_str.as_str() {
                 "microphone-only" => Some(audio::recording_commands::RecordingMode::MicrophoneOnly),
@@ -316,7 +317,7 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Warn if recording_mode conversion failed or is None
     if recording_mode_enum.is_none() && recording_mode.is_some() {
-        log::warn!("⚠️ Failed to parse recording_mode '{}'! This will use default SystemAudioOnly mode.", 
+        log::warn!("⚠️ Failed to parse recording_mode '{}'! This will use default SystemAudioOnly mode.",
                   recording_mode.as_ref().unwrap());
     } else if recording_mode_enum.is_none() {
         log::warn!("⚠️ recording_mode is None! This will use default SystemAudioOnly mode. If you intended to specify a mode, check frontend code.");
@@ -622,6 +623,8 @@ pub fn run() {
             api::test_backend_connection,
             api::debug_backend_connection,
             api::open_external_url,
+            // LRC import command
+            lrc::commands::api_import_lrc,
             // Summary commands
             summary::api_process_transcript,
             summary::api_get_summary,

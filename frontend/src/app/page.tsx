@@ -2653,12 +2653,30 @@ export default function Home() {
 
                 <LRCImport
                   onImport={async (file) => {
-                    // Placeholder for future backend implementation
-                    console.log('Importing LRC file:', file.name);
-                    // TODO: Implement backend API call here
-                    // await invoke('api_import_lrc', { file: ... });
-                    // Close modal after successful import
-                    setShowImportLRC(false);
+                    try {
+                      // Read file content
+                      const fileContent = await file.text();
+                      console.log('Importing LRC file:', file.name);
+
+                      // Call backend API
+                      const meetingId = await invoke('api_import_lrc', {
+                        fileContent
+                      }) as string;
+
+                      console.log('LRC imported successfully, meeting ID:', meetingId);
+
+                      // Close modal
+                      setShowImportLRC(false);
+
+                      // Refresh meetings list in sidebar
+                      await refetchMeetings();
+
+                      // Navigate to meeting details page
+                      router.push(`/meeting-details?id=${meetingId}`);
+                    } catch (error) {
+                      console.error('Failed to import LRC:', error);
+                      throw error; // Let LRCImport component handle the error toast
+                    }
                   }}
                   disabled={isRecording}
                 />
