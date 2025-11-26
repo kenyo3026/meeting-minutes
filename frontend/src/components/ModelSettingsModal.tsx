@@ -77,6 +77,18 @@ export function ModelSettingsModal({
   const [autoGenerateEnabled, setAutoGenerateEnabled] = useState<boolean>(true); // Default to true
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isEndpointSectionCollapsed, setIsEndpointSectionCollapsed] = useState<boolean>(true); // Collapsed by default
+  
+  // Auto summary interval state (in seconds), default 180s, minimum 60s
+  const [autoSummaryInterval, setAutoSummaryInterval] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('autoSummaryInterval');
+      if (saved) {
+        const val = parseInt(saved, 10);
+        return isNaN(val) ? 180 : Math.max(60, val);
+      }
+    }
+    return 180;
+  });
 
   // Use global download context instead of local state
   const { isDownloading, getProgress, downloadingModels } = useOllamaDownload();
@@ -401,6 +413,13 @@ export function ModelSettingsModal({
     //   console.error('Failed to save auto-generate setting:', err);
     //   toast.error('Failed to save auto-generate setting');
     // }
+
+    // Save autoSummaryInterval to localStorage (validate minimum 60 seconds)
+    const finalInterval = Math.max(60, autoSummaryInterval);
+    localStorage.setItem('autoSummaryInterval', finalInterval.toString());
+    if (finalInterval !== autoSummaryInterval) {
+      setAutoSummaryInterval(finalInterval);  // Update UI if corrected
+    }
 
     onSave(updatedConfig);
   };
@@ -889,6 +908,36 @@ export function ModelSettingsModal({
           />
         </div>
       </div> */}
+
+      {/* Auto Summary Time Interval Setting */}
+      <div className="mt-6 pt-6 border-t border-gray-200">
+        <div className="flex items-center justify-between">
+          <div className="flex-1">
+            <Label htmlFor="auto-summary-interval" className="text-base font-medium">
+              Auto Summary Time Interval
+            </Label>
+            <p className="text-sm text-muted-foreground mt-1">
+              Time interval for automatic summary generation during recording (minimum 60 seconds)
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              id="auto-summary-interval"
+              type="number"
+              min={60}
+              value={autoSummaryInterval}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                if (!isNaN(val) && val > 0) {
+                  setAutoSummaryInterval(val);  // Allow free input, validate on save
+                }
+              }}
+              className="w-24 text-right"
+            />
+            <span className="text-sm text-muted-foreground">seconds</span>
+          </div>
+        </div>
+      </div>
 
       <div className="mt-6 flex justify-end">
         <Button

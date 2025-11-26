@@ -157,7 +157,19 @@ export default function Home() {
 
   // Auto Summary feature status
   const [autoSummaryInterval, setAutoSummaryInterval] = useState<NodeJS.Timeout | null>(null);
-  const AUTO_SUMMARY_MINUTES = 5; // Every N minute auto-generate summary (configurable)
+  // Auto summary interval: read from localStorage (in seconds), convert to minutes
+  const AUTO_SUMMARY_MINUTES = (() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('autoSummaryInterval');
+      if (saved) {
+        const seconds = parseInt(saved, 10);
+        if (!isNaN(seconds)) {
+          return Math.max(60, seconds) / 60; // Convert to minutes, minimum 60s
+        }
+      }
+    }
+    return 3; // Default: 180 seconds = 3 minutes
+  })();
   // Use ref to avoid closure issues, allowing listeners to get the latest meeting ID
   const currentMeetingIdRef = useRef<string | null>(null);
 
