@@ -27,7 +27,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
 import { Button } from '@/components/ui/button';
-import { Copy, GlobeIcon, Settings } from 'lucide-react';
+import { Copy, GlobeIcon, Settings, Upload } from 'lucide-react';
 import { MicrophoneIcon } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import { ButtonGroup } from '@/components/ui/button-group';
@@ -35,6 +35,7 @@ import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
+import { LRCImport } from '@/components/LRCImport';
 
 
 
@@ -85,7 +86,7 @@ export default function Home() {
   const [chunkDropMessage, setChunkDropMessage] = useState('');
   const [isSavingTranscript, setIsSavingTranscript] = useState(false);
   const [isRecordingDisabled, setIsRecordingDisabled] = useState(false);
-  
+
   // Load selectedDevices from localStorage on initialization
   const loadSelectedDevicesFromStorage = (): SelectedDevices => {
     if (typeof window === 'undefined') {
@@ -95,7 +96,7 @@ export default function Home() {
         recordingMode: DEFAULT_RECORDING_MODE
       };
     }
-    
+
     try {
       const stored = localStorage.getItem('selectedDevices');
       if (stored) {
@@ -112,16 +113,16 @@ export default function Home() {
     } catch (error) {
       console.error('Failed to load selectedDevices from localStorage:', error);
     }
-    
+
     return {
       micDevice: null,
       systemDevice: null,
       recordingMode: DEFAULT_RECORDING_MODE
     };
   };
-  
+
   const [selectedDevices, setSelectedDevices] = useState<SelectedDevices>(loadSelectedDevicesFromStorage());
-  
+
   // Save selectedDevices to localStorage whenever it changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -137,6 +138,7 @@ export default function Home() {
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [modelSelectorMessage, setModelSelectorMessage] = useState('');
   const [showLanguageSettings, setShowLanguageSettings] = useState(false);
+  const [showImportLRC, setShowImportLRC] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('auto-translate');
   const [isProcessingTranscript, setIsProcessingTranscript] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
@@ -261,7 +263,7 @@ export default function Home() {
     if (target.closest('button') || target.closest('input') || target.closest('textarea')) {
       return;
     }
-    
+
     if (!recordingPanelRef.current) return;
     const rect = recordingPanelRef.current.getBoundingClientRect();
     dragOffsetRef.current = {
@@ -277,14 +279,14 @@ export default function Home() {
 
   const handleDrag = useCallback((e: MouseEvent) => {
     if (!isDragging || !recordingPanelRef.current) return;
-    
+
     // Check if mouse has moved enough to start dragging
     const deltaX = Math.abs(e.clientX - dragStartPosRef.current.x);
     const deltaY = Math.abs(e.clientY - dragStartPosRef.current.y);
     if (deltaX < DRAG_THRESHOLD && deltaY < DRAG_THRESHOLD) {
       return;
     }
-    
+
     setRecordingPanelPosition({
       x: e.clientX - dragOffsetRef.current.x,
       y: e.clientY - dragOffsetRef.current.y
@@ -959,7 +961,7 @@ export default function Home() {
             setShowSummary(true); // Immediately show the summary panel
             console.log('✅ Auto-start recording started - showSummary: true, meetingId:', meetingId);
             Analytics.trackButtonClick('start_recording', 'sidebar_auto');
-            
+
             // Start auto summary
             startAutoSummary();
 
@@ -979,7 +981,7 @@ export default function Home() {
     const timeoutId = setTimeout(() => {
       checkAutoStartRecording();
     }, 100);
-    
+
     return () => clearTimeout(timeoutId);
   }, [isRecording, isMeetingActive, selectedDevices]);
 
@@ -1011,7 +1013,7 @@ export default function Home() {
 
       // const documentContent = `Meeting Title: ${meetingTitle}\nDate: ${new Date().toLocaleString()}\n\nTranscript:\n${formattedTranscript}`;
 
-      // await invoke('save_transcript', { 
+      // await invoke('save_transcript', {
       //   filePath: transcriptPath,
       //   content: documentContent
       // });
@@ -1159,7 +1161,7 @@ export default function Home() {
       if (isCallApi && transcriptionComplete == true) {
 
         setIsSavingTranscript(true);
-        
+
         // Get fresh transcript state (ALL transcripts including late ones)
         const freshTranscripts = [...transcriptsRef.current];
 
@@ -2131,7 +2133,7 @@ export default function Home() {
 
             {/* Recording control buttons - draggable in split view mode */}
             {((hasMicrophone || hasSystemAudio) || recordingState.isRecording) && !isProcessingStop && !isSavingTranscript && (
-              <div 
+              <div
                 ref={recordingPanelRef}
                 className="fixed z-10 cursor-move select-none"
                 style={{
@@ -2205,7 +2207,7 @@ export default function Home() {
                         Model
                       </span>
                     </Button>
-                  
+
                   <Button
                     variant="outline"
                     size="sm"
@@ -2226,6 +2228,17 @@ export default function Home() {
                     <GlobeIcon />
                     <span className='hidden md:inline'>
                       Language
+                    </span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowImportLRC(true)}
+                    title="Import LRC file"
+                  >
+                    <Upload />
+                    <span className='hidden md:inline'>
+                      Import
                     </span>
                   </Button>
                   </ButtonGroup>
@@ -2618,6 +2631,37 @@ export default function Home() {
                     Done
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Import LRC Modal */}
+          {showImportLRC && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Import LRC File</h3>
+                  <button
+                    onClick={() => setShowImportLRC(false)}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <LRCImport
+                  onImport={async (file) => {
+                    // Placeholder for future backend implementation
+                    console.log('Importing LRC file:', file.name);
+                    // TODO: Implement backend API call here
+                    // await invoke('api_import_lrc', { file: ... });
+                    // Close modal after successful import
+                    setShowImportLRC(false);
+                  }}
+                  disabled={isRecording}
+                />
               </div>
             </div>
           )}
