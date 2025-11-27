@@ -36,8 +36,8 @@ pub struct LrcMetadata {
 
 /// Parse LRC file content into structured data
 pub fn parse_lrc(content: &str) -> Result<LrcParseResult, String> {
-    // Regex for LRC timestamp: [mm:ss.xx] or [mm:ss]
-    let timestamp_regex = Regex::new(r"^\[(\d{1,2}):(\d{2})\.?(\d{0,2})\](.*)$")
+    // Regex for LRC timestamp: [mm:ss.xx] or [mm:ss] or [mmm:ss.xx] (supports any number of minutes)
+    let timestamp_regex = Regex::new(r"^\[(\d+):(\d{2})\.?(\d{0,2})\](.*)$")
         .map_err(|e| format!("Failed to compile regex: {}", e))?;
 
     let mut lines = Vec::new();
