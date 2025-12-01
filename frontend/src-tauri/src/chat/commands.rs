@@ -5,7 +5,7 @@ use crate::database::repositories::{
     transcript_chunk::TranscriptChunksRepository,
 };
 use crate::state::AppState;
-use crate::summary::llm_client::{ChatMessage, stream_chat, LLMProvider};
+use crate::summary::llm_client::{ChatMessage, ChatTemplateKwargs, stream_chat, LLMProvider};
 use log::{error as log_error, info as log_info};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,7 @@ pub struct ChatRequest {
     pub top_p: Option<f32>,
     pub repeat_penalty: Option<f32>,
     pub repeat_last_n: Option<i32>,
+    pub chat_template_kwargs: Option<ChatTemplateKwargs>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -164,6 +165,7 @@ pub async fn api_chat_send_message<R: Runtime>(
     let max_tokens = request.max_tokens;
     let repeat_penalty = request.repeat_penalty;
     let repeat_last_n = request.repeat_last_n;
+    let chat_template_kwargs = request.chat_template_kwargs.clone();
 
     // Create HTTP client
     let client = Client::new();
@@ -195,6 +197,7 @@ pub async fn api_chat_send_message<R: Runtime>(
             max_tokens,
             repeat_penalty,
             repeat_last_n,
+            chat_template_kwargs,
         )
         .await
         {

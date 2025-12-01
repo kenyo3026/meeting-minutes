@@ -106,6 +106,9 @@ pub struct Setting {
     #[sqlx(rename = "openaiCompatibleApiKey")]
     #[serde(rename = "openaiCompatibleApiKey")]
     pub openai_compatible_api_key: Option<String>,
+    #[sqlx(rename = "completionParams")]
+    #[serde(rename = "completionParams")]
+    pub completion_params: Option<String>, // JSON string
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

@@ -92,6 +92,13 @@ pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
 }
 
+// Chat template kwargs structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatTemplateKwargs {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+}
+
 // Completion parameters structure (shared between summary and chat)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionParams {
@@ -105,6 +112,8 @@ pub struct CompletionParams {
     pub repeat_penalty: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repeat_last_n: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_template_kwargs: Option<ChatTemplateKwargs>,
 }
 
 impl Default for CompletionParams {
@@ -115,6 +124,9 @@ impl Default for CompletionParams {
             max_tokens: Some(2048),
             repeat_penalty: Some(1.1),
             repeat_last_n: Some(64),
+            chat_template_kwargs: Some(ChatTemplateKwargs {
+                reasoning_effort: Some("low".to_string()),
+            }),
         }
     }
 }
@@ -135,6 +147,8 @@ pub struct StreamingChatRequest {
     pub repeat_penalty: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repeat_last_n: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_template_kwargs: Option<ChatTemplateKwargs>,
 }
 
 // Generic structure for OpenAI-compatible API chat responses
@@ -688,8 +702,6 @@ async fn _generate_summary_streaming(
         },
     ];
 
-    info!("🐞 Full messages: {}", serde_json::to_string_pretty(&messages).unwrap_or_default());
-
     // Use provided completion params or defaults
     let params = completion_params.unwrap_or_default();
 
@@ -702,9 +714,15 @@ async fn _generate_summary_streaming(
         max_tokens: params.max_tokens,
         repeat_penalty: params.repeat_penalty,
         repeat_last_n: params.repeat_last_n,
+        chat_template_kwargs: params.chat_template_kwargs,
     };
 
     info!("🚀 Sending streaming summary request to {}: {}", provider_name(provider), api_url);
+
+    // Log complete request payload in JSON format
+    if let Ok(json_payload) = serde_json::to_string_pretty(&request_body) {
+        info!("📤 LLM Request Payload:\n{}", json_payload);
+    }
 
     // Send request
     let response = client
@@ -999,6 +1017,7 @@ pub async fn stream_chat<R: Runtime>(
     max_tokens: Option<u32>,
     repeat_penalty: Option<f32>,
     repeat_last_n: Option<i32>,
+    chat_template_kwargs: Option<ChatTemplateKwargs>,
 ) -> Result<(), String> {
     info!(
         "🌊 Starting streaming chat for request_id: {} with provider: {:?}, model: {}",
@@ -1039,6 +1058,7 @@ pub async fn stream_chat<R: Runtime>(
                 max_tokens,
                 repeat_penalty,
                 repeat_last_n,
+                chat_template_kwargs,
             )
             .await
         }
@@ -1080,6 +1100,7 @@ async fn stream_chat_openai_compatible<R: Runtime>(
     max_tokens: Option<u32>,
     repeat_penalty: Option<f32>,
     repeat_last_n: Option<i32>,
+    chat_template_kwargs: Option<ChatTemplateKwargs>,
 ) -> Result<(), String> {
     // Determine API endpoint
     let (api_url, mut headers) = match provider {
@@ -1133,8 +1154,6 @@ async fn stream_chat_openai_compatible<R: Runtime>(
     );
 
     // Build streaming request body
-    info!("🐞 Full messages: {}", serde_json::to_string_pretty(&messages).unwrap_or_default());
-
     let request_body = StreamingChatRequest {
         model: model_name.to_string(),
         messages,
@@ -1144,9 +1163,15 @@ async fn stream_chat_openai_compatible<R: Runtime>(
         max_tokens,
         repeat_penalty,
         repeat_last_n,
+        chat_template_kwargs,
     };
 
     info!("🚀 Sending streaming request to {}: {}", provider_name(provider), api_url);
+
+    // Log complete request payload in JSON format
+    if let Ok(json_payload) = serde_json::to_string_pretty(&request_body) {
+        info!("📤 LLM Request Payload:\n{}", json_payload);
+    }
 
     // Send request
     let response = client

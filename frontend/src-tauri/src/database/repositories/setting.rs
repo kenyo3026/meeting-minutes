@@ -69,6 +69,25 @@ impl SettingsRepository {
         Ok(())
     }
 
+    pub async fn save_completion_params(
+        pool: &SqlitePool,
+        completion_params: Option<&str>, // JSON string
+    ) -> std::result::Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO settings (id, provider, model, whisperModel, completionParams)
+            VALUES ('1', 'openai-compatible', 'gpt-4o-2024-11-20', 'large-v3', $1)
+            ON CONFLICT(id) DO UPDATE SET
+                completionParams = $1
+            "#,
+        )
+        .bind(completion_params)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn save_api_key(
         pool: &SqlitePool,
         provider: &str,

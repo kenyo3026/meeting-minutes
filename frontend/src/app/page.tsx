@@ -28,6 +28,7 @@ import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
 import { Button } from '@/components/ui/button';
 import { Copy, GlobeIcon, Settings, Upload } from 'lucide-react';
+import { loadCompletionParams } from '@/utils/completionParams';
 import { MicrophoneIcon } from '@heroicons/react/24/outline';
 import { toast } from 'sonner';
 import { ButtonGroup } from '@/components/ui/button-group';
@@ -1428,16 +1429,9 @@ export default function Home() {
       console.log('Processing transcript...');
       const meetingIdForSummary = currentMeetingIdRef.current;
       console.log('📍 Using meeting ID for summary:', meetingIdForSummary);
-      // Load completion params from localStorage
+      // Load completion params from database (preferred) or localStorage (fallback)
       const completionParams = typeof window !== 'undefined'
-        ? (() => {
-            try {
-              const saved = localStorage.getItem('completionParams');
-              return saved ? JSON.parse(saved) : null;
-            } catch {
-              return null;
-            }
-          })()
+        ? await loadCompletionParams()
         : null;
 
       const result = await invoke('api_process_transcript', {
@@ -1733,16 +1727,9 @@ export default function Home() {
 
       // Process transcript and get process_id
       console.log('Processing transcript...');
-      // Load completion params from localStorage
+      // Load completion params from localStorage with defaults
       const completionParams = typeof window !== 'undefined'
-        ? (() => {
-            try {
-              const saved = localStorage.getItem('completionParams');
-              return saved ? JSON.parse(saved) : null;
-            } catch {
-              return null;
-            }
-          })()
+        ? loadCompletionParams()
         : null;
 
       const result = await invoke('api_process_transcript', {

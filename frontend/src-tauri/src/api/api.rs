@@ -78,6 +78,8 @@ pub struct ModelConfig {
     pub ollama_endpoint: Option<String>,
     #[serde(rename = "openaiCompatibleEndpoint")]
     pub openai_compatible_endpoint: Option<String>,
+    #[serde(rename = "completionParams")]
+    pub completion_params: Option<String>, // JSON string
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -475,6 +477,7 @@ pub async fn api_get_model_config<R: Runtime>(
                         api_key,
                         ollama_endpoint: config.ollama_endpoint,
                         openai_compatible_endpoint: config.openai_compatible_endpoint,
+                        completion_params: config.completion_params,
                     }))
                 }
                 Err(e) => {
@@ -571,6 +574,52 @@ pub async fn api_get_api_key<R: Runtime>(
         }
         Err(e) => {
             log_error!("Failed to get API key for provider '{}': {}", &provider, e);
+            Err(e.to_string())
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn api_save_completion_params<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    completion_params: Option<String>, // JSON string
+    _auth_token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    log_info!("💾 api_save_completion_params called (native)");
+    let pool = state.db_manager.pool();
+
+    if let Err(e) = SettingsRepository::save_completion_params(pool, completion_params.as_deref()).await {
+        log_error!("❌ Failed to save completion params to database: {}", e);
+        return Err(e.to_string());
+    }
+
+    log_info!("✅ Successfully saved completion params to database");
+    Ok(
+        serde_json::json!({ "status": "success", "message": "Completion params saved successfully" }),
+    )
+}
+
+#[tauri::command]
+pub async fn api_get_completion_params<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    _auth_token: Option<String>,
+) -> Result<Option<String>, String> {
+    log_info!("api_get_completion_params called (native)");
+    let pool = state.db_manager.pool();
+
+    match SettingsRepository::get_model_config(pool).await {
+        Ok(Some(config)) => {
+            log_info!("✅ Successfully retrieved completion params from database");
+            Ok(config.completion_params)
+        }
+        Ok(None) => {
+            log_warn!("⚠️ No model config found in database");
+            Ok(None)
+        }
+        Err(e) => {
+            log_error!("❌ Failed to get completion params from database: {}", e);
             Err(e.to_string())
         }
     }
@@ -1062,8 +1111,8 @@ pub async fn api_save_single_transcript<R: Runtime>(
     // Retrieve all transcripts for this meeting and join as complete text
     let all_transcripts: Vec<crate::database::models::Transcript> = sqlx::query_as(
         r#"
-        SELECT * FROM transcripts 
-        WHERE meeting_id = ? 
+        SELECT * FROM transcripts
+        WHERE meeting_id = ?
         ORDER BY COALESCE(audio_start_time, 0) ASC, id ASC
         "#
     )

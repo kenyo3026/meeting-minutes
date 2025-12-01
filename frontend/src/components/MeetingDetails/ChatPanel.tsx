@@ -5,6 +5,7 @@ import { MessageSquare, Send, FileText, ChevronDown, ChevronUp, Maximize2, Trash
 import { Button } from '@/components/ui/button';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { Summary, Transcript } from '@/types';
+import { loadCompletionParams } from '@/utils/completionParams';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
@@ -389,33 +390,29 @@ export function ChatPanel({
         endpoint = modelConfig.openaiCompatibleEndpoint || undefined;
       }
 
-      // Load completion params from localStorage
-      const completionParams = (() => {
-        try {
-          const saved = localStorage.getItem('completionParams');
-          return saved ? JSON.parse(saved) : {};
-        } catch {
-          return {};
-        }
-      })();
+      // Load completion params from database (preferred) or localStorage (fallback)
+      const completionParams = await loadCompletionParams();
 
       // Send chat request with new API format
       // Backend will build system prompt from meeting context
+      const chatRequest = {
+        meeting_id: meeting.id,
+        user_messages: userMessages,
+        current_message: userMessage.content,
+        provider: modelConfig.provider,
+        model: modelConfig.model,
+        api_key: apiKey,
+        endpoint: endpoint,
+        temperature: completionParams.temperature ?? 0.7,
+        max_tokens: completionParams.max_tokens ?? 2048,
+        top_p: completionParams.top_p,
+        repeat_penalty: completionParams.repeat_penalty,
+        repeat_last_n: completionParams.repeat_last_n,
+        chat_template_kwargs: completionParams.chat_template_kwargs,
+      };
+
       await invoke('api_chat_send_message', {
-        request: {
-          meeting_id: meeting.id,
-          user_messages: userMessages,
-          current_message: userMessage.content,
-          provider: modelConfig.provider,
-          model: modelConfig.model,
-          api_key: apiKey,
-          endpoint: endpoint,
-          temperature: completionParams.temperature ?? 0.7,
-          max_tokens: completionParams.max_tokens ?? 2048,
-          top_p: completionParams.top_p,
-          repeat_penalty: completionParams.repeat_penalty,
-          repeat_last_n: completionParams.repeat_last_n,
-        }
+        request: chatRequest
       });
 
     } catch (error) {

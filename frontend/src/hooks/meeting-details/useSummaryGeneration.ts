@@ -5,6 +5,7 @@ import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
+import { loadCompletionParams } from '@/utils/completionParams';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -109,16 +110,9 @@ export function useSummaryGeneration({
         await Analytics.trackCustomPromptUsed(customPrompt.trim().length);
       }
 
-      // Load completion params from localStorage
+      // Load completion params from database
       const completionParams = typeof window !== 'undefined'
-        ? (() => {
-            try {
-              const saved = localStorage.getItem('completionParams');
-              return saved ? JSON.parse(saved) : null;
-            } catch {
-              return null;
-            }
-          })()
+        ? await loadCompletionParams()
         : null;
 
       // Process transcript and get process_id

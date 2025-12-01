@@ -18,6 +18,11 @@ import { Switch } from '@/components/ui/switch';
 import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { DEFAULT_COMPLETION_PARAMS, loadCompletionParams } from '@/utils/completionParams';
+
+export interface ChatTemplateKwargs {
+  reasoning_effort?: "low" | "medium" | "high" | null;
+}
 
 export interface CompletionParams {
   temperature?: number | null;
@@ -25,6 +30,7 @@ export interface CompletionParams {
   max_tokens?: number | null;
   repeat_penalty?: number | null;
   repeat_last_n?: number | null;
+  chat_template_kwargs?: ChatTemplateKwargs | null;
 }
 
 export interface ModelConfig {
@@ -98,31 +104,17 @@ export function ModelSettingsModal({
     return 180;
   });
 
-  // Completion parameters state
-  const [completionParams, setCompletionParams] = useState<CompletionParams>(() => {
-    const defaults: CompletionParams = {
-      temperature: null,
-      top_p: null,
-      max_tokens: 2048,
-      repeat_penalty: 1.1,
-      repeat_last_n: 64,
+  // Completion parameters state - load from database on mount
+  const [completionParams, setCompletionParams] = useState<CompletionParams>(DEFAULT_COMPLETION_PARAMS);
+
+  // Load completion params from database on mount
+  useEffect(() => {
+    const loadParams = async () => {
+      const params = await loadCompletionParams();
+      setCompletionParams(params);
     };
-
-    // Try to load from localStorage first
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('completionParams');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          return { ...defaults, ...parsed };
-        } catch (e) {
-          console.error('Failed to parse completionParams from localStorage:', e);
-        }
-      }
-    }
-
-    return defaults;
-  });
+    loadParams();
+  }, []);
 
   // Use global download context instead of local state
   const { isDownloading, getProgress, downloadingModels } = useOllamaDownload();
@@ -455,9 +447,16 @@ export function ModelSettingsModal({
       setAutoSummaryInterval(finalInterval);  // Update UI if corrected
     }
 
-    // Save completionParams to localStorage
+    // Save completionParams to database
     if (modelConfig.provider === 'openai-compatible') {
-      localStorage.setItem('completionParams', JSON.stringify(completionParams));
+      try {
+        await invoke('api_save_completion_params', {
+          completionParams: JSON.stringify(completionParams),
+        });
+      } catch (err) {
+        console.error('Failed to save completion params to database:', err);
+        // Don't block the save operation if DB save fails
+      }
     }
 
     onSave(updatedConfig);
@@ -562,12 +561,13 @@ export function ModelSettingsModal({
   });
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
+    <div className="flex flex-col max-h-[80vh]">
+      <div className="flex justify-between items-center mb-4 flex-shrink-0">
         <h3 className="text-lg font-semibold">Model Settings</h3>
       </div>
 
-      <div className="space-y-4">
+      <ScrollArea className="flex-1 overflow-y-auto pr-4">
+        <div className="space-y-4">
         <div>
           <Label>Summarization Model</Label>
           <div className="flex space-x-2 mt-1">
@@ -1084,6 +1084,49 @@ export function ModelSettingsModal({
                 className="w-28 text-right"
               />
             </div>
+
+            {/* chat_template_kwargs */}
+            <div>
+              <Label className="text-sm font-medium">
+                chat_template_kwargs
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Additional template parameters
+              </p>
+              <div className="pl-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <Label htmlFor="reasoning_effort" className="text-sm font-medium">
+                      reasoning_effort
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Reasoning depth for model inference
+                    </p>
+                  </div>
+                  <Select
+                    value={completionParams.chat_template_kwargs?.reasoning_effort ?? "low"}
+                    onValueChange={(value: "low" | "medium" | "high") => {
+                      setCompletionParams(prev => ({
+                        ...prev,
+                        chat_template_kwargs: {
+                          ...prev.chat_template_kwargs,
+                          reasoning_effort: value
+                        }
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className="w-28">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">low</SelectItem>
+                      <SelectItem value="medium">medium</SelectItem>
+                      <SelectItem value="high">high</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1117,8 +1160,9 @@ export function ModelSettingsModal({
           </div>
         </div>
       </div>
+      </ScrollArea>
 
-      <div className="mt-6 flex justify-end">
+      <div className="mt-4 pt-4 border-t border-gray-200 flex justify-end flex-shrink-0">
         <Button
           className={cn(
             'px-4 text-sm font-medium text-white rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500',
